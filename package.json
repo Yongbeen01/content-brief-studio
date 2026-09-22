@@ -1,0 +1,17 @@
+{
+  "name": "content-brief-studio",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "브랜드 자료와 컨셉으로 TikTok 크리에이터용 영상 기획서를 만들고 노션에 올리는 로컬 도구",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node --test \"test/**/*.test.js\"",
+    "team-code": "node src/tools/make-team-code.js"
+  },
+  "dependencies": {}
+}

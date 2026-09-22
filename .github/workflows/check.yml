@@ -1,0 +1,46 @@
+name: check
+
+# push 할 때마다 도는 최소한의 그물. main 에 push = 팀원 PC 자동 업데이트라 여기서 막는다.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 문법
+        run: for f in src/*.js src/*/*.js web/js/*.js; do node --check "$f"; done
+
+      - name: 단위 테스트 (시크릿 검사 포함)
+        run: npm test
+
+      - name: BOM 규칙
+        # install.ps1 은 irm | iex 로 돌아 BOM 이 있으면 첫 줄이 깨진다.
+        # -File 로 도는 스크립트는 BOM 이 없으면 PowerShell 5.1 이 한글을 깨뜨린다.
+        run: |
+          bom() { [ "$(head -c3 "$1" | xxd -p)" = "efbbbf" ]; }
+          fail=0
+          if bom scripts/install.ps1; then echo "::error file=scripts/install.ps1::BOM 이 있으면 irm | iex 가 깨집니다"; fail=1; fi
+          for f in scripts/launch.ps1 scripts/install-shortcut.ps1; do
+            if ! bom "$f"; then echo "::error file=$f::-File 로 실행되므로 UTF-8 BOM 이 있어야 합니다"; fail=1; fi
+          done
+          exit $fail
+
+      - name: bat 규칙
+        # cmd.exe 는 .bat 을 OEM 코드페이지로 읽는다 — 비ASCII 한 글자로 줄이 깨진다. LF 만 있으면 파싱도 깨진다.
+        run: |
+          fail=0
+          for f in scripts/*.bat; do
+            if LC_ALL=C grep -nP '[^\x00-\x7F]' "$f" >/dev/null; then echo "::error file=$f::비ASCII 문자가 있습니다"; fail=1; fi
+            if ! grep -q $'\r$' "$f"; then echo "::error file=$f::CRLF 가 아닙니다"; fail=1; fi
+            if ! grep -q 'Zone.Identifier' "$f"; then echo "::error file=$f::인터넷 표식(Zone.Identifier)을 지우는 줄이 없습니다"; fail=1; fi
+          done
+          exit $fail

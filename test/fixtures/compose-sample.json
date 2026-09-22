@@ -1,0 +1,83 @@
+{
+  "brandName": "LUMIA",
+  "productName": "LUMIA Glow Drop Serum",
+  "whatIsIt": [
+    "The **LUMIA Glow Drop Serum** is a Korean hydrating serum for dull, tired-looking skin, in a 30ml dropper bottle.",
+    "A water-light gel texture that sinks in fast instead of sitting on top of your skin.",
+    "Niacinamide: helps the look of uneven tone",
+    "Hyaluronic Acid: helps skin feel plump and hydrated"
+  ],
+  "howToUse": [
+    "1. Apply 2–3 drops to clean skin.",
+    "Gently pat until fully absorbed.",
+    "Use morning and night before moisturizer."
+  ],
+  "mainIdea": [
+    "A close-up, texture-driven TikTok showcasing LUMIA's water-light glow serum.",
+    "It walks through the dropper, the texture on skin and the instant glow."
+  ],
+  "hashtags": ["#glowserum", "#kbeauty", "#skintok", "#glassskin"],
+  "caption": "wait why does my skin look like this 😳\nthis water-light serum sinks in instantly\ngrab it on tiktok shop 💧",
+  "pronunciation": "**LOO-mee-ah**",
+  "music": "Anything bright and upbeat.\nAvoid trending audio with harsh edits.",
+  "videoType": "Vertical, 9:16, 1080x1920 or higher. 20–30 seconds. Bright lighting.",
+  "steps": [
+    {
+      "title": "Step 1 (HOOK): The Dropper Drip",
+      "hook": true, "star": false, "seconds": 4,
+      "action": ["Start **mid-action**, squeezing the dropper over your cheek.", "No intro."],
+      "visual": ["Extreme close-up of the drop.", "Use this moment as the **thumbnail**."],
+      "subtitle": ["one drop = glass skin?"],
+      "narration": ["“Okay… watch this.”"],
+      "gifHint": "스포이드에서 한 방울 떨어지는 클로즈업"
+    },
+    {
+      "title": "Texture Close-Up",
+      "hook": false, "star": true, "seconds": 6,
+      "action": ["Rub a drop between two fingers.", "Show how fast it absorbs."],
+      "visual": ["This should be the **hero product shot**."],
+      "subtitle": ["water-light → no sticky finish"],
+      "narration": ["“It literally melts in.”"],
+      "gifHint": "손가락 사이 텍스처"
+    },
+    {
+      "title": "Pat It In",
+      "hook": false, "star": false, "seconds": 6,
+      "action": ["Pat the serum into both cheeks."],
+      "visual": ["Close-up of your face in bright light."],
+      "subtitle": ["pat pat pat"],
+      "narration": [],
+      "gifHint": "두 볼에 두드려 흡수"
+    },
+    {
+      "title": "Final Look + CTA",
+      "hook": false, "star": false, "seconds": 6,
+      "action": ["Hold the bottle next to your face."],
+      "visual": ["Make sure the **LUMIA logo** is visible."],
+      "subtitle": ["glow unlocked ✨"],
+      "narration": ["“This is my glow step now.”"],
+      "gifHint": "제품을 얼굴 옆에 들고 마무리"
+    }
+  ],
+  "stepNotes": [{ "afterStep": 2, "text": "Do not squeeze the dropper bulb too hard — it spills." }],
+  "dos": [
+    { "title": "1. Show the texture clearly", "desc": "Close up, in focus, bright light." },
+    { "title": "Show the full routine", "desc": "Drop, rub, pat — in that order." },
+    { "title": "Say the key words", "desc": "\"Water-light serum.\" \"Niacinamide.\"" },
+    { "title": "Film in bright, even light", "desc": "Daylight or a ring light. Full HD or better." }
+  ],
+  "donts": [
+    { "title": "do not show other brands", "desc": "No other skincare products in frame." },
+    { "title": "DO NOT use filters", "desc": "Show your real skin." }
+  ],
+  "forbiddenWords": {
+    "note": "This is a cosmetic product, not a medicine.",
+    "rows": [{ "dont": "treats dullness", "instead": "helps the look of dullness" }]
+  },
+  "sellingPointCoverage": [
+    { "point": "water-light texture that absorbs fast", "steps": [2] },
+    { "point": "instant glow", "steps": [4] }
+  ],
+  "sourceNotes": "- 30ml 스포이드 용기 (출처: deck.pptx)\n- 나이아신아마이드·히알루론산 (출처: deck.pptx)",
+  "warnings": []
+}

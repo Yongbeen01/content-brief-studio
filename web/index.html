@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Content Brief Studio</title>
+  <!-- 파이널 리포트 플러그인과 같은 글꼴(한글 음절 범위별 조각이라 필요한 조각만 받는다) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+  <link rel="stylesheet" href="/css/app.css">
+  <link rel="stylesheet" href="/css/preview.css">
+  <script src="/vendor/markdown-it.min.js"></script>
+  <script type="module" src="/js/main.js"></script>
+</head>
+<body>
+  <div class="container-wide">
+    <header>
+      <h1>Content Brief <span class="gradient-text">Studio</span></h1>
+      <p class="subtitle">브랜드 자료와 컨셉으로 TikTok 크리에이터 가이드를 만들고 노션에 올립니다.</p>
+      <span class="fx-env hidden" id="env_badge"></span>
+      <div class="fx-head-actions">
+        <button type="button" class="fx-topbar-btn" id="claude_btn"><span class="dot"></span><span class="t">Claude 확인 중…</span></button>
+        <button type="button" class="fx-topbar-btn" id="notion_btn"><span class="dot"></span><span class="t">노션 확인 중…</span></button>
+      </div>
+    </header>
+
+    <div class="layout">
+      <!-- 왼쪽: 입력 -->
+      <section class="col-form">
+        <div class="card" id="form_section">
+          <div class="form-group">
+            <label for="f_name" class="fx-required-label" data-req="briefName">컨텐츠 브리프 이름</label>
+            <p class="form-hint">노션 페이지 제목이 됩니다. 예) [BRAND]US_TikTok_제품명 _컨셉 Guide</p>
+            <input type="text" id="f_name" autocomplete="off" placeholder="[CLERIVY]US_TikTok_Microdart Spot Patch _Close-Up & Reaction Angle Guide">
+          </div>
+
+          <div class="form-group">
+            <label for="f_upload" class="fx-required-label" data-req="uploadUrl">업로드폼 링크</label>
+            <p class="form-hint">크리에이터가 영상 주소를 제출할 폼 — 「submit your video URL here」에 걸립니다.</p>
+            <input type="text" id="f_upload" inputmode="url" autocomplete="off" placeholder="https://docs.google.com/forms/…">
+          </div>
+
+          <div class="form-group">
+            <label for="f_tiktok">틱톡샵 링크 <span class="opt">(선택)</span></label>
+            <p class="form-hint">「15% affiliate commission」 안내 줄에 걸립니다. 비우면 그 줄이 빠집니다.</p>
+            <input type="text" id="f_tiktok" inputmode="url" autocomplete="off" placeholder="https://vm.tiktok.com/…">
+          </div>
+
+          <div class="form-group">
+            <label for="f_amazon">아마존 링크 <span class="opt">(선택)</span></label>
+            <p class="form-hint">안내 박스에 「Check out the product on Amazon」 줄로 들어갑니다.</p>
+            <input type="text" id="f_amazon" inputmode="url" autocomplete="off" placeholder="https://www.amazon.com/dp/…">
+          </div>
+
+          <div class="form-group">
+            <label for="f_account" class="fx-required-label" data-req="accountId">Account ID</label>
+            <p class="form-hint">Account Tag 에 그대로 들어갑니다.</p>
+            <div class="fx-prefix" id="f_account_wrap"><span>@</span><input type="text" id="f_account" autocomplete="off" spellcheck="false" placeholder="clerivy.global"></div>
+          </div>
+
+          <div class="form-group">
+            <label for="f_notion">사측 공유 파일 <span class="opt">(선택)</span></label>
+            <p class="form-hint">브랜드가 준 자료 — pdf·pptx·docx·xlsx 파일 또는 노션 링크. 제품 설명·해시태그·장면·Do's 를 여기서 찾습니다.</p>
+            <div class="fx-attach">
+              <button type="button" class="fx-attach-btn" id="f_attach_btn">첨부파일</button>
+              <input type="text" id="f_notion" autocomplete="off" placeholder="노션 링크를 붙여넣고 Enter">
+            </div>
+            <input type="file" id="f_files" class="fx-hidden-file" multiple accept=".pdf,.pptx,.docx,.xlsx">
+            <div class="fx-attach-list" id="f_sources"></div>
+          </div>
+
+          <div class="form-group">
+            <label for="f_points" class="fx-required-label" data-req="sellingPoints">소구점</label>
+            <p class="form-hint">영상에서 <b>반드시 보여 주고 강조해야 하는 점</b>. 컨셉 안에서 제품의 어떤 부분을 부각할지 한 줄에 하나씩.</p>
+            <textarea id="f_points" placeholder="- 피부 속으로 녹아드는 미세 다트가 보이게&#10;- 붙일 때 따끔한 느낌 = 효과가 있다는 인상"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="f_concept" class="fx-required-label" data-req="concept">컨셉 설명</label>
+            <p class="form-hint">영상의 전반적인 내용·타입·흐름.</p>
+            <textarea id="f_concept" class="tall" placeholder="클로즈업과 리액션 위주. 붙이는 순간의 리액션으로 시작해서 패드 → 패치 → 떼어낸 뒤 모습 순서로…"></textarea>
+          </div>
+        </div>
+
+        <div id="submit_buttons">
+          <button type="button" class="primary-btn" id="generate_btn" disabled><span class="btn-text">생성</span><span class="loader"></span></button>
+        </div>
+        <p class="fx-status" id="form_status"></p>
+
+        <div class="card progress-panel hidden" id="progress_panel">
+          <div class="progress-head"><h3 id="progress_title">기획서를 만들고 있습니다</h3><span class="progress-eta" id="progress_eta"></span></div>
+          <ol class="progress-steps" id="progress_steps"></ol>
+          <div class="progress-foot"><button type="button" class="secondary-btn" id="progress_cancel">멈추기</button></div>
+        </div>
+      </section>
+
+      <!-- 오른쪽: 미리보기 -->
+      <section class="col-preview">
+        <div class="card preview-bar hidden" id="preview_bar">
+          <span class="preview-title">미리보기</span>
+          <span class="fx-chip" id="preview_hint">누르면 고치기 · 사이를 누르면 추가</span>
+          <span class="fx-spacer"></span>
+          <button type="button" class="secondary-btn" id="undo_btn" disabled title="Ctrl+Z">되돌리기</button>
+          <button type="button" class="secondary-btn" id="copy_md_btn">마크다운 복사</button>
+          <button type="button" class="secondary-btn" id="new_btn">새 기획서</button>
+          <button type="button" class="primary-btn" id="publish_btn">노션에 최종 생성</button>
+        </div>
+
+        <div class="preview-side">
+          <div class="fx-block hidden" id="warn_block">
+            <div class="fx-block-head">확인할 점 <span class="fx-chip warn" id="warn_count"></span><span class="fx-spacer"></span></div>
+            <ul class="fx-warn-list" id="warn_list"></ul>
+          </div>
+          <details class="card hidden" id="source_notes">
+            <summary>자료에서 뽑은 내용 <svg class="fx-chevron" width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></summary>
+            <div class="source-notes-body" id="source_notes_body"></div>
+          </details>
+          <div class="fx-block hidden" id="published_block">
+            <div class="fx-block-head">노션에 만든 페이지</div>
+            <ul class="fx-warn-list" id="published_list"></ul>
+          </div>
+        </div>
+
+        <div class="doc-card" id="doc_card">
+          <div class="empty-preview" id="empty_preview">
+            <strong>아직 미리보기가 없습니다</strong>
+            왼쪽을 채우고 [생성]을 누르면 여기에 노션 페이지 모양으로 나옵니다.
+          </div>
+          <div class="notion-doc hidden" id="doc"></div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- 편집 팝오버 -->
+  <div class="edit-pop hidden" id="edit_pop" role="dialog" aria-label="고치기">
+    <div class="edit-pop-head"><span id="edit_pop_title">이 부분 고치기</span><span class="fx-spacer"></span>
+      <button type="button" class="fx-overlay-close" id="edit_pop_close" aria-label="닫기"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    </div>
+    <div class="edit-pop-where" id="edit_pop_where"></div>
+    <textarea id="edit_pop_text" placeholder="예) 더 짧고 재밌게 / 성분 이름을 넣어 줘 / 이 스텝을 두 개로 나눠 줘"></textarea>
+    <div class="edit-pop-actions">
+      <button type="button" class="primary-btn" id="edit_pop_apply"><span class="btn-text">적용</span><span class="loader"></span></button>
+      <button type="button" class="secondary-btn" id="edit_pop_cancel">취소</button>
+      <button type="button" class="fx-link-btn danger" id="edit_pop_delete">삭제</button>
+    </div>
+    <div class="edit-pop-hint" id="edit_pop_hint">Ctrl+Enter 로 적용</div>
+    <p class="fx-status" id="edit_pop_status"></p>
+  </div>
+
+  <!-- 팀 설정 코드 -->
+  <dialog class="fx-overlay fx-modal" id="team_dialog">
+    <div class="fx-overlay-head">노션 연결 준비 <span class="fx-spacer"></span>
+      <button type="button" class="fx-overlay-close" data-close aria-label="닫기"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    </div>
+    <div class="fx-overlay-body">
+      <p class="fx-help">노션에 페이지를 만들려면 먼저 <b>팀 설정 코드</b>가 필요합니다. 관리자에게 받은 <code>CBS1.</code> 로 시작하는 한 줄을 붙여넣어 주세요. 이 코드는 이 PC 에만 저장됩니다.</p>
+      <input type="text" id="team_code" autocomplete="off" spellcheck="false" placeholder="CBS1.…">
+      <p class="fx-status" id="team_status"></p>
+    </div>
+    <div class="fx-overlay-foot"><button type="button" class="primary-btn" id="team_save">저장하고 노션 연결하기</button></div>
+  </dialog>
+
+  <!-- 노션 연결 정보 -->
+  <dialog class="fx-overlay fx-modal" id="notion_dialog">
+    <div class="fx-overlay-head">노션 연결 <span class="fx-spacer"></span>
+      <button type="button" class="fx-overlay-close" data-close aria-label="닫기"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    </div>
+    <div class="fx-overlay-body">
+      <dl class="kv" id="notion_kv"></dl>
+      <p class="fx-help">노션 승인 화면에서 <b>Contents Guidline</b> 페이지를 꼭 선택해야 그 아래에 새 페이지를 만들 수 있습니다. 승인은 약 6개월마다 다시 필요합니다.</p>
+      <p class="fx-status" id="notion_status"></p>
+    </div>
+    <div class="fx-overlay-foot">
+      <div class="fx-overlay-actions">
+        <button type="button" class="secondary-btn" id="notion_disconnect">연결 끊기</button>
+        <button type="button" class="secondary-btn" id="notion_recode">팀 설정 코드 다시 넣기</button>
+        <button type="button" class="primary-btn" id="notion_reconnect">다시 연결</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 게시 -->
+  <dialog class="fx-overlay fx-modal" id="publish_dialog">
+    <div class="fx-overlay-head">노션에 최종 생성 <span class="fx-spacer"></span>
+      <button type="button" class="fx-overlay-close" data-close aria-label="닫기"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    </div>
+    <div class="fx-overlay-body">
+      <dl class="kv" id="publish_kv"></dl>
+      <ul class="fx-warn-list" id="publish_warns"></ul>
+      <div class="hidden" id="publish_progress">
+        <div class="progress-bar"><div id="publish_bar"></div></div>
+        <p class="fx-status busy" id="publish_status"></p>
+      </div>
+      <p class="fx-status" id="publish_result"></p>
+    </div>
+    <div class="fx-overlay-foot">
+      <div class="fx-overlay-actions">
+        <button type="button" class="secondary-btn" data-close id="publish_cancel">취소</button>
+        <button type="button" class="primary-btn" id="publish_go"><span class="btn-text">노션에 만들기</span><span class="loader"></span></button>
+      </div>
+    </div>
+  </dialog>
+
+  <input type="file" id="slot_file" class="fx-hidden-file" accept="image/png,image/jpeg,image/gif,image/webp">
+  <div class="toast hidden" id="toast"></div>
+</body>
+</html>

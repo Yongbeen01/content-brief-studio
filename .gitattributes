@@ -1,0 +1,12 @@
+# .bat 은 바이트 그대로 저장한다 (-text).
+# raw.githubusercontent.com 은 저장된 그대로(LF) 내보내는데, cmd.exe 는 LF 만 있는
+# .bat 을 온전히 파싱하지 못한다. 그래서 CRLF 로 저장하고 git 이 손대지 않게 한다.
+*.bat -text
+*.cmd -text
+
+# PowerShell·VBScript 는 체크아웃 때 CRLF 로 맞춘다.
+*.ps1 text eol=crlf
+*.vbs text eol=crlf
+
+*.png binary
+*.woff2 binary

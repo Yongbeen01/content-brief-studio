@@ -1,0 +1,10 @@
+node_modules/
+.env
+.env.*
+config.json
+*.log
+.DS_Store
+Thumbs.db
+# 실행 중 데이터는 전부 ~/.content-brief-studio 에 있다. 레포 안에 떨어지면 안 되는 것들:
+.data/
+_repro/
