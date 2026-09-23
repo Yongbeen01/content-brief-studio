@@ -216,10 +216,6 @@
     </div>
     <div class="fx-overlay-body">
       <p class="fx-help" id="slot_where">사측 공유 파일에서 찾은 사진입니다. 누르면 그 자리에 들어갑니다.</p>
-      <button type="button" class="slot-video-btn hidden" id="slot_video">
-        <span class="slot-video-icon" aria-hidden="true">&#9654;</span>
-        <span><b>영상에서 GIF 만들기</b><br><small>영상을 올리면 이 스텝에 맞는 구간을 찾아 잘라 줍니다</small></span>
-      </button>
       <div class="slot-grid" id="slot_grid"></div>
     </div>
     <div class="fx-overlay-foot">
@@ -230,37 +226,18 @@
     </div>
   </dialog>
 
-  <!-- 영상에서 GIF 만들기 -->
-  <dialog class="fx-overlay fx-modal wide" id="video_dialog">
-    <div class="fx-overlay-head">영상에서 GIF 만들기 <span class="fx-spacer"></span>
+  <!-- 구간 고르기 — 미리보기가 커야 고를 수 있어 이것만 창으로 띄운다(올리기·처리는 상자 안에서) -->
+  <dialog class="fx-overlay fx-modal wide" id="clip_dialog">
+    <div class="fx-overlay-head">구간 고르기 <span class="fx-spacer"></span>
       <button type="button" class="fx-overlay-close" data-close aria-label="닫기"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
     </div>
     <div class="fx-overlay-body">
-      <p class="fx-help" id="video_step"></p>
-      <div class="video-list" id="video_list"></div>
-      <div class="fx-attach">
-        <button type="button" class="fx-attach-btn" id="video_add">영상 올리기</button>
-        <span class="fx-attach-note">mp4·mov·webm · 2분까지 (넘으면 앞 2분만 씁니다)</span>
-      </div>
-      <input type="file" id="video_file" class="fx-hidden-file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm">
-      <div class="hidden" id="video_progress">
-        <div class="progress-bar"><div id="video_bar"></div></div>
-        <p class="fx-status busy" id="video_status"></p>
-      </div>
-      <div class="video-cands hidden" id="video_cands"></div>
-      <div class="video-manual hidden" id="video_manual">
-        <label for="video_from">직접 구간 지정</label>
-        <input type="number" id="video_from" min="0" step="0.5" placeholder="시작(초)">
-        <span>~</span>
-        <input type="number" id="video_to" min="0" step="0.5" placeholder="끝(초)">
-        <button type="button" class="secondary-btn" id="video_manual_go">이 구간으로</button>
-      </div>
-      <p class="fx-status" id="video_result"></p>
+      <p class="fx-help" id="clip_where"></p>
+      <div class="clip-grid" id="clip_grid"></div>
+      <div class="clip-manual" id="clip_manual"></div>
     </div>
     <div class="fx-overlay-foot">
-      <div class="fx-overlay-actions">
-        <button type="button" class="secondary-btn" data-close id="video_close">닫기</button>
-      </div>
+      <div class="fx-overlay-actions"><button type="button" class="secondary-btn" data-close>닫기</button></div>
     </div>
   </dialog>
 

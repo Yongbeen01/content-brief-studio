@@ -188,3 +188,24 @@ test('구간 고르기 — 스텝 글과 화면 설명을 보내고, 답은 다�
   const fresh = store.addVideo({ name: 'new.mp4', data: Buffer.alloc(2048, 1) });
   await assert.rejects(matchClip({ videoId: fresh.id, doc, path: slotPath, jobDir: tmp(), run: async () => ({}) }), /준비되지 않았습니다/);
 });
+
+test('같은 영상을 다시 올리면 이미 올린 것을 쓴다 — 화면 읽기는 한 번', async () => {
+  const data = Buffer.alloc(4096, 7);
+  const a = store.addVideo({ name: 'take1.mp4', data, draftId: 'same' });
+  const b = store.addVideo({ name: '이름만 다름.mp4', data, draftId: 'same' });
+  assert.equal(b.id, a.id, '같은 초안·같은 바이트면 같은 영상이다');
+  const other = store.addVideo({ name: 'take1.mp4', data, draftId: '다른초안' });
+  assert.notEqual(other.id, a.id);
+  const changed = store.addVideo({ name: 'take2.mp4', data: Buffer.alloc(4096, 8), draftId: 'same' });
+  assert.notEqual(changed.id, a.id);
+
+  // 이미 준비된 영상은 다시 읽지 않는다
+  const { prepareVideo } = await import('../src/video/prepare.js');
+  store.update(a.id, { status: 'ready', durationSec: 10, usedSec: 10 });
+  store.writeFrames(a.id, [{ t: 0, desc: '제품' }]);
+  const again = await prepareVideo({
+    id: a.id, jobDir: tmp(), run: () => { throw new Error('Claude 를 다시 부르면 안 된다'); },
+  });
+  assert.equal(again.status, 'ready');
+  assert.equal(again.id, a.id);
+});

@@ -44,6 +44,17 @@ New-Item -ItemType Directory -Force -Path $DataDir, $Runtime | Out-Null
 # 이미 돌고 있으면 먼저 멈춘다 — 실행 중인 node 가 앱 폴더를 잠가 clone 이 '액세스 거부'로 끝난다.
 Step '실행 중인 앱 확인'
 $stopped = $false
+# 이미 깔려 있으면 그쪽 실행기에 맡긴다 — pid 파일과 포트를 같이 본다.
+$oldLaunch = Join-Path $AppDir 'scriptslaunch.ps1'
+if (Test-Path $oldLaunch) {
+  try { & powershell -NoProfile -ExecutionPolicy Bypass -File $oldLaunch -Stop | Out-Null } catch {}
+}
+# 그래도 포트를 잡고 있으면 그 프로세스를 멈춘다.
+# 명령줄만 보면 못 찾는다 — 실행기가 상대경로로 띄워 명령줄에 앱 폴더가 안 들어간다(실측).
+$port = if ($env:CBS_PORT) { [int]$env:CBS_PORT } else { 4325 }
+foreach ($owner in @((Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue).OwningProcess)) {
+  if ($owner) { Stop-Process -Id $owner -Force -ErrorAction SilentlyContinue; $stopped = $true }
+}
 foreach ($p in (Get-Process node -ErrorAction SilentlyContinue)) {
   $cmdline = ''
   try { $cmdline = (Get-CimInstance Win32_Process -Filter "ProcessId=$($p.Id)" -ErrorAction Stop).CommandLine } catch {}

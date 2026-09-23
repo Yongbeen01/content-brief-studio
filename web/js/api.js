@@ -16,6 +16,9 @@ export class ApiError extends Error {
   }
 }
 
+/** 올리는 진행률 때문에 XHR 을 쓰는 곳이 있어 토큰을 꺼내 준다. */
+export const sessionToken = () => token;
+
 export async function api(method, path, body, { raw = false, headers = {} } = {}) {
   const init = { method, headers: { ...headers }, cache: 'no-store' };
   if (method !== 'GET') init.headers['x-cbs-token'] = token;

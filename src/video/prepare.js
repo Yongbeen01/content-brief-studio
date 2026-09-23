@@ -9,7 +9,7 @@ import { makeSheets } from '../media/frames.js';
 import { transcribe } from '../media/speech.js';
 import { DESCRIBE_SCHEMA, describeSystem, describeUser } from './prompts.js';
 import {
-  getVideo, originalPath, sheetsDir, sourcePath, update, videoDir, writeFrames, writeSpeech,
+  getVideo, originalPath, readFrames, sheetsDir, sourcePath, update, videoDir, writeFrames, writeSpeech,
 } from './store.js';
 
 /**
@@ -71,6 +71,8 @@ async function describeFrames({ files, grid, usedSec, jobDir, signal, onProgress
 export async function prepareVideo({ id, jobDir, onProgress = () => {}, signal, run = runClaude }) {
   const rec = getVideo(id);
   if (!rec) throw new Error('영상을 찾지 못했습니다.');
+  // 같은 영상을 여러 스텝에 쓰면 여기로 다시 온다 — 화면 읽기(제일 비싼 호출)는 영상당 한 번뿐이다.
+  if (rec.status === 'ready' && readFrames(id)?.length) return rec;
   update(id, { status: 'preparing', error: '' });
   const toolProgress = (p) => {
     if (p?.total && p?.done) onProgress({ phase: 'tools', detail: `${p.label ?? '도구'} 내려받는 중`, done: p.done, total: p.total });

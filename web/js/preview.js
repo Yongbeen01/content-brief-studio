@@ -57,7 +57,7 @@ function slot(node, path, cls = '') {
   const ratio = Number(node.ratio) || 1;
   const box = el('div', {
     class: `n-slot ${cls} ${node.asset ? 'has-image' : ''}`.trim(),
-    dataset: { slot: P(path) },
+    dataset: { slot: P(path), slotId: node.id ?? '', slotKind: node.slot ?? '' },
     // 회색 자리일 때만 정해진 비율. 사진이 들어오면 노션처럼 사진 제 모양대로 보여 준다(잘리지 않게).
     style: node.asset ? null : `aspect-ratio: 100 / ${Math.round(ratio * 100)};`,
     title: node.asset ? '눌러서 다른 사진으로 바꾸기' : '눌러서 사진 넣기',
@@ -68,7 +68,8 @@ function slot(node, path, cls = '') {
   } else {
     box.append(el('div', { class: 'n-slot-label' }, node.displayLabel ?? node.label ?? '사진 자리'));
     if (node.hint) box.append(el('div', { class: 'n-slot-hint' }, node.hint));
-    box.append(el('div', { class: 'n-slot-hint' }, '눌러서 사진 넣기'));
+    // 스텝의 참고 GIF 자리는 누르면 상자 안에서 영상→GIF 를 만든다(web/js/video.js 가 그린다).
+    box.append(el('div', { class: 'n-slot-hint' }, node.slot === 'step' ? '눌러서 영상·GIF 넣기' : '눌러서 사진 넣기'));
   }
   return box;
 }

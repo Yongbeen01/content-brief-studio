@@ -67,12 +67,20 @@ export function addVideo({ name, data, draftId = '' }) {
   fs.mkdirSync(DIRS.videos, { recursive: true });
   if (!kindOf(name)) throw new Error('mp4·mov·webm 영상만 올릴 수 있습니다.');
   if (data.length > config.media.maxVideoBytes) throw new Error(`영상이 ${Math.round(config.media.maxVideoBytes / 1048576)}MB 를 넘습니다.`);
+  // 같은 영상을 여러 스텝에 올리는 일이 흔하다. 바이트가 같으면 이미 올린 것을 그대로 쓴다 —
+  // 화면 읽기(제일 비싼 호출)를 영상마다 한 번만 하기 위해서다.
+  const hash = crypto.createHash('sha256').update(data).digest('hex');
+  // listVideos('') 는 전부를 뜻하므로 초안 id 를 직접 맞춘다 — 다른 초안의 영상을 물고 오면 안 된다.
+  const same = listVideos().find((v) => v.hash === hash && String(v.draftId) === String(draftId)
+    && v.status !== 'error' && fs.existsSync(path.join(dirOf(v.id), v.file)));
+  if (same) return same;
   const id = crypto.randomBytes(8).toString('hex');
   fs.mkdirSync(dirOf(id), { recursive: true });
   fs.writeFileSync(path.join(dirOf(id), `original${path.extname(name).toLowerCase()}`), data);
   return save({
     id,
     draftId: String(draftId),
+    hash,
     name: String(name),
     size: data.length,
     file: `original${path.extname(name).toLowerCase()}`,

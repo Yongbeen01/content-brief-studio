@@ -498,44 +498,65 @@ details.card[open] > summary .fx-chevron { transform: rotate(180deg); }
 }
 .toast.bad { background: var(--fx-error); }
 
-/* ── 영상에서 GIF 만들기 ─────────────────────────────────── */
-.slot-video-btn {
-  display: flex; align-items: center; gap: 10px; width: 100%;
-  text-align: left; font: inherit; color: var(--fx-text); cursor: pointer;
-  background: var(--fx-blue-weakest); border: 1px solid var(--fx-blue-weaker);
-  border-radius: var(--fx-r-sm); padding: 10px 12px;
+
+/* ── 회색 상자 안에서 영상 → GIF ─────────────────────────── */
+.slot-video-btn { display: none; }        /* 창에 있던 버튼 — 이제 상자 안에 있다 */
+.n-slot.has-panel {
+  aspect-ratio: auto !important;
+  padding: 10px;
+  background: var(--fx-blue-weakest);
+  color: var(--fx-text);
+  cursor: default;
+  text-align: left;
 }
-.slot-video-btn:hover { border-color: var(--fx-blue); }
-.slot-video-btn small { color: var(--fx-text-weak); }
-.slot-video-icon {
-  flex: none; width: 26px; height: 26px; border-radius: 50%;
-  background: var(--fx-blue); color: #fff;
-  display: grid; place-items: center; font-size: 11px; padding-left: 2px;
+.n-slot.has-panel:hover { outline: none; }
+/* 패널은 상자 내용을 덮기만 한다 — 패널이 빠지면 원래 모습(넣은 GIF)이 돌아온다. */
+.n-slot.has-panel > :not([data-vid-panel]) { display: none; }
+.vp { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.vp-head { font-size: 0.82rem; font-weight: 600; color: var(--fx-text-weak); }
+.vp-btn {
+  width: 100%; padding: 8px 10px; font: inherit; font-size: 0.88rem; font-weight: 500;
+  background: var(--fx-card); color: var(--fx-text);
+  border: 1px solid var(--fx-input-stroke); border-radius: var(--fx-r-sm); cursor: pointer;
 }
-.video-list { display: flex; flex-direction: column; gap: 6px; }
-.video-item {
-  display: flex; align-items: center; gap: 8px;
-  background: var(--fx-sunken); border-radius: var(--fx-r-sm); padding: 6px 10px;
+.vp-btn:hover { border-color: var(--fx-blue); }
+.vp-btn.primary { background: var(--fx-blue); border-color: var(--fx-blue); color: #fff; }
+.vp-btn.primary:hover { background: var(--fx-blue-hover); }
+.vp-btn.small { width: auto; padding: 5px 10px; font-size: 0.82rem; }
+.vp-link {
+  align-self: flex-start; background: none; border: 0; padding: 2px 0;
+  font: inherit; font-size: 0.78rem; color: var(--fx-text-weak); text-decoration: underline; cursor: pointer;
 }
-.video-item.is-on { outline: 2px solid var(--fx-blue); outline-offset: -2px; }
-.video-item.bad { background: var(--fx-error-bg); }
-.video-item-name {
-  flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px;
-  text-align: left; background: none; border: 0; padding: 0; font: inherit; cursor: pointer; color: inherit;
+.vp-note { font-size: 0.75rem; color: var(--fx-text-weak); line-height: 1.4; }
+.vp-err { font-size: 0.8rem; color: var(--fx-error); line-height: 1.4; word-break: break-word; }
+.vp-bar { height: 5px; border-radius: 3px; background: var(--fx-track); overflow: hidden; }
+.vp-bar > div { height: 100%; background: var(--fx-blue); transition: width 0.3s ease; }
+.vp-cand {
+  display: flex; gap: 8px; align-items: flex-start; width: 100%; text-align: left;
+  background: var(--fx-card); border: 1px solid var(--fx-input-stroke); border-radius: var(--fx-r-sm);
+  padding: 6px; cursor: pointer; font: inherit;
 }
-.video-item-name b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.video-item-name small { color: var(--fx-text-weak); font-size: 0.78rem; }
-.video-cands { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-.video-cand {
-  display: flex; flex-direction: column; gap: 6px;
-  background: var(--fx-sunken); border-radius: var(--fx-r-sm); padding: 8px;
+.vp-cand:hover { border-color: var(--fx-blue); }
+.vp-cand video { flex: none; width: 96px; aspect-ratio: 16 / 9; object-fit: contain; background: #000; border-radius: 4px; }
+.vp-cand-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.vp-cand-body b { font-size: 0.78rem; }
+.vp-cand-body span { font-size: 0.75rem; color: var(--fx-text-weak); line-height: 1.35; }
+.vp-manual { display: flex; align-items: center; gap: 5px; }
+.vp-manual input { width: 62px; padding: 4px 6px; font-size: 0.8rem; }
+.vp-manual span { color: var(--fx-text-weaker); font-size: 0.8rem; }
+
+.clip-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.clip-cand {
+  display: flex; flex-direction: column; gap: 6px; text-align: left; font: inherit; cursor: pointer;
+  background: var(--fx-sunken); border: 1px solid var(--fx-input-stroke);
+  border-radius: var(--fx-r-sm); padding: 8px;
 }
-.video-cand video { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #000; border-radius: 6px; }
-.video-cand-time { font-size: 0.78rem; color: var(--fx-text-weak); }
-.video-cand-why { font-size: 0.82rem; flex: 1 1 auto; line-height: 1.4; }
-.video-cand .primary-btn { width: 100%; padding: 6px 10px; }
-.video-manual { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; flex-wrap: wrap; }
-.video-manual label { font-weight: 600; color: var(--fx-text-weak); }
-.video-manual input { width: 96px; }
-.video-manual .secondary-btn { width: auto; padding: 6px 12px; }
-@media (max-width: 760px) { .video-cands { grid-template-columns: 1fr; } }
+.clip-cand:hover { border-color: var(--fx-blue); }
+.clip-cand video { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #000; border-radius: 6px; }
+.clip-cand b { font-size: 0.8rem; }
+.clip-cand span { font-size: 0.8rem; color: var(--fx-text-weak); line-height: 1.4; flex: 1 1 auto; }
+.clip-cand .vp-btn { margin-top: 2px; }
+.clip-manual { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; flex-wrap: wrap; }
+.clip-manual label { font-weight: 600; color: var(--fx-text-weak); }
+.clip-manual input { width: 96px; }
+@media (max-width: 760px) { .clip-grid { grid-template-columns: 1fr; } }

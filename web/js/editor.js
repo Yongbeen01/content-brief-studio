@@ -230,7 +230,8 @@ export function createEditor({ root, getDoc, getSourceNotes, commit, isLocked, s
         setRunning(false);
         setBusy(false); // 먼저 풀어야 결과가 편집 가능한 모양으로 그려진다
         const flash = t.mode === 'edit' ? t.path : [...t.containerPath, t.index];
-        commit(job.result.doc, { flashPath: flash });
+        // 도는 동안 다른 상자에서 GIF·사진이 들어왔을 수 있다 — 그건 살려서 합친다.
+        commit(job.result.doc, { flashPath: flash, keep: true });
         target = null;
         pop.classList.add('hidden');
         toast(t.mode === 'edit' ? '고쳤습니다' : '추가했습니다');
@@ -285,6 +286,8 @@ export function createEditor({ root, getDoc, getSourceNotes, commit, isLocked, s
   });
 
   root.addEventListener('click', (ev) => {
+    // 회색 상자 안의 영상 패널(버튼·후보)은 그쪽이 직접 처리한다.
+    if (ev.target.closest('[data-vid-panel]')) return;
     if (!root.classList.contains('is-editable')) return;
     const link = ev.target.closest('a');
     if (link && (ev.ctrlKey || ev.metaKey)) return; // Ctrl+클릭은 링크 열기

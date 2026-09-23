@@ -1,11 +1,11 @@
 import { api, initSession, pollJob, sleep, uploadAsset } from './api.js';
 import { createInline } from './inline.js';
-import { clone, docToMarkdown, getAt, imageSlots, setAt, uid } from './doc.js';
+import { clone, docToMarkdown, getAt, imageSlots, keepAssets, setAt, uid } from './doc.js';
 import { lintDoc } from './lint.js';
 import { renderDoc, setInline } from './preview.js';
 import { createEditor } from './editor.js';
 import { englishLabel, placeholderBlob, uploadImage } from './slots.js';
-import { createVideoPicker } from './video.js';
+import { createVideoPanel } from './video.js';
 
 const $ = (id) => document.getElementById(id);
 const inline = createInline(window.markdownit);
@@ -230,7 +230,7 @@ async function removeSource(id) {
 // ── 미리보기 · 경고 ─────────────────────────────────────────────────────────
 
 let editor = null;
-let videoPicker = null;
+let videoPanel = null;
 
 /**
  * 지금 폼 입력을 반영한 문서. 입력에서 바로 나오는 두 곳 — 페이지 제목과 Account Tag 줄 — 은
@@ -294,6 +294,8 @@ function renderPreview() {
   $('doc').classList.toggle('hidden', !doc);
   $('preview_bar').classList.toggle('hidden', !doc);
   if (doc) renderDoc($('doc'), shown, { editable: !showEn && (!state.busy || editor?.isRunning()), lang: showEn ? 'en' : 'ko' });
+  // 문서를 통째로 다시 그렸으니 상자 안에서 돌고 있던 영상 작업을 다시 그려 넣는다.
+  if (!showEn) videoPanel?.paint();
   $('preview_hint').textContent = showEn
     ? '영어 미리보기 · 노션에 올라갈 모양 (읽기 전용)'
     : '누르면 고치기 · 사이를 누르면 추가';
@@ -308,7 +310,16 @@ function renderPreview() {
   renderPublished();
 }
 
-function commitDoc(next, { flashPath } = {}) {
+/**
+ * @param {object|((cur:object)=>object)} next  지금 문서를 받아 새 문서를 돌려주는 함수도 된다 —
+ *   영상처럼 오래 걸리는 일은 끝났을 때의 문서에 넣어야 그 사이의 다른 변경을 덮지 않는다.
+ * @param {{flashPath?:any[], keep?:boolean}} [opts]  keep = 지금 문서의 사진을 살려서 합친다(AI 편집 결과용)
+ */
+function commitDoc(next, { flashPath, keep } = {}) {
+  const base = state.draft.doc;
+  let doc = typeof next === 'function' ? next(base) : next;
+  if (keep && base) doc = keepAssets(doc, base);
+  next = doc;
   if (state.draft.doc) {
     state.undo.push(state.draft.doc);
     if (state.undo.length > 50) state.undo.shift();
@@ -509,17 +520,14 @@ function pickFromPc() {
  * 없으면 예전처럼 바로 내 컴퓨터에서 고른다.
  */
 function onSlotClick(path, el) {
+  const node = getAt(state.draft.doc, path) ?? {};
+  // 스텝의 참고 GIF 자리는 창을 띄우지 않는다 — 상자 안에서 [영상으로 GIF 생성]·[GIF 업로드] 로 끝낸다.
+  if (node.slot === 'step') return videoPanel.toggle(node.id);
   slotTarget = { path, el };
   const photos = sourcePhotos();
-  const node = getAt(state.draft.doc, path) ?? {};
-  // 스텝의 참고 GIF 자리는 영상에서 잘라 넣을 수 있다 — 고를 사진이 없어도 창을 연다.
-  const isStep = node.slot === 'step';
-  if (!photos.length && !isStep) return pickFromPc();
-  $('slot_video').classList.toggle('hidden', !isStep);
+  if (!photos.length) return pickFromPc();
   const what = node.slot === 'product' ? '제품 이미지' : node.label || '사진';
-  $('slot_where').textContent = photos.length
-    ? `「${what}」 자리 — 사측 공유 파일에서 찾은 사진입니다. 누르면 그 자리에 들어갑니다.`
-    : `「${what}」 자리 — 영상에서 잘라 넣거나, 내 컴퓨터에서 사진을 고르세요.`;
+  $('slot_where').textContent = `「${what}」 자리 — 사측 공유 파일에서 찾은 사진입니다. 누르면 그 자리에 들어갑니다.`;
   $('slot_grid').replaceChildren(...photos.map((im) => {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -738,6 +746,8 @@ function openPublish() {
   add('사진', `${filled}곳 넣음 · ${slots.length - filled}곳 회색 이미지`);
   const warns = lintDoc(doc, { plain: inline.plain }).filter((w) => w.level === 'warn');
   const extra = [];
+  const vids = videoPanel?.busyCount() ?? 0;
+  if (vids) extra.push({ level: 'warn', text: `영상에서 GIF 를 만드는 중인 자리가 ${vids}곳 있습니다. 지금 올리면 그 자리는 회색으로 올라갑니다.` });
   if (state.draft.published?.length) extra.push({ level: 'warn', text: `이 초안으로 이미 ${state.draft.published.length}번 만들었습니다. 한 번 더 누르면 새 페이지가 하나 더 생깁니다(기존 페이지는 그대로).` });
   $('publish_warns').replaceChildren(...[...extra, ...warns].map((w) => {
     const li = document.createElement('li');
@@ -905,17 +915,13 @@ function wire() {
   }
   $('slot_file').addEventListener('change', onSlotFile);
   $('slot_from_pc').addEventListener('click', () => { $('slot_dialog').close(); pickFromPc(); });
-  $('slot_video').addEventListener('click', () => {
-    const t = slotTarget;
-    $('slot_dialog').close();
-    if (t) videoPicker.open(t.path);
-  });
   document.addEventListener('keydown', (e) => {
     const inField = /^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName);
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !inField && !e.shiftKey) { e.preventDefault(); undo(); }
   });
 
-  videoPicker = createVideoPicker({
+  videoPanel = createVideoPanel({
+    root: $('doc'),
     getDoc: () => clone(currentDoc()),
     getDraftId: () => state.draft.id,
     commit: (next) => commitDoc(next),

@@ -190,6 +190,22 @@ export function imageSlots(doc) {
   return out;
 }
 
+/**
+ * 사진 자리의 사진만 지금 문서에서 가져와 덮어쓴다.
+ * AI 편집은 보낸 순간의 문서에 고친 결과를 돌려주므로, 그 사이에 다른 상자에서 GIF·사진이 들어왔다면
+ * 그대로 두면 사라진다. 같은 자리(id)가 양쪽에 다 있고 지금 문서에만 사진이 있으면 그 사진을 살린다.
+ */
+export function keepAssets(incoming, current) {
+  const have = new Map(imageSlots(current).map((s) => [s.node?.id, s.node?.asset]).filter(([id, a]) => id && a));
+  if (!have.size) return incoming;
+  const next = clone(incoming);
+  for (const s of imageSlots(next)) {
+    const asset = have.get(s.node?.id);
+    if (asset && !s.node.asset) s.node.asset = asset;
+  }
+  return next;
+}
+
 // ── 마크다운 내보내기 ───────────────────────────────────────────────────────
 
 /** 노션에 붙여넣어도 모양이 대체로 살아나는 마크다운. 노션 게시가 안 될 때의 비상구다. */
