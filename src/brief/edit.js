@@ -56,6 +56,11 @@ function describe(doc, p) {
 }
 
 const stripId = ({ id, ...rest }) => rest;
+/**
+ * 고친 글이 화면에 보이려면 고정 문구 표시를 떼어 내야 한다 — 표시가 남아 있으면
+ * 사람이 고친 글 대신 정해진 문구가 계속 보인다. 뗀 뒤로는 노션에 올릴 때 옮기기 대상이 된다.
+ */
+const stripChrome = ({ chrome, vars, ...rest }) => rest;
 
 /**
  * @returns {{ kind: string, current: object, where: string, hint?: string, apply: (doc:object, v:object)=>object }}
@@ -95,7 +100,7 @@ export function resolveTarget(doc, p) {
   switch (value?.type) {
     case 'paragraph':
     case 'heading':
-      return { kind: 'text', current: { text: value.text }, where, apply: (d, v) => setAt(d, p, { ...value, text: v.text }) };
+      return { kind: 'text', current: { text: value.text }, where, apply: (d, v) => setAt(d, p, { ...stripChrome(value), text: v.text }) };
     case 'bulleted':
     case 'numbered':
       return { kind: 'list', current: { items: value.items }, where, apply: (d, v) => setAt(d, p, { ...value, items: v.items }) };

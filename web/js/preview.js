@@ -58,7 +58,8 @@ function slot(node, path, cls = '') {
   const box = el('div', {
     class: `n-slot ${cls} ${node.asset ? 'has-image' : ''}`.trim(),
     dataset: { slot: P(path) },
-    style: `aspect-ratio: 100 / ${Math.round(ratio * 100)};`,
+    // 회색 자리일 때만 정해진 비율. 사진이 들어오면 노션처럼 사진 제 모양대로 보여 준다(잘리지 않게).
+    style: node.asset ? null : `aspect-ratio: 100 / ${Math.round(ratio * 100)};`,
     title: node.asset ? '눌러서 다른 사진으로 바꾸기' : '눌러서 사진 넣기',
   });
   if (node.asset) {

@@ -7,6 +7,7 @@ import { getSource, getSourceFile, getSourceText } from '../sources/index.js';
 import { COMPOSE, fixEscapes, validate } from './schema.js';
 import { composeSystem, composeUser } from './prompts.js';
 import { buildDoc, splitPoints } from './build.js';
+import { collectCandidates, pickProductImage } from './product-image.js';
 import { lintDoc } from '../../web/js/lint.js';
 import { inline } from './inline.js';
 
@@ -15,6 +16,7 @@ import { inline } from './inline.js';
  *
  * 1. 자료 모으기 — 글 자료는 프롬프트에, PDF 는 작업 폴더에 복사해 Claude 가 Read 로 본다.
  * 2. 작성(Claude 1회). 결과 모양이 틀리거나 소구점을 안 보여 주는 스텝이 있으면 사유를 붙여 한 번 더.
+ *    그 사이에 제품 사진 고르기를 **같이 돌린다**(다른 Claude 호출이라 기다림이 겹치지 않는다).
  * 3. 코드가 고정 틀과 합쳐 문서를 만들고 검사한다.
  */
 
@@ -50,7 +52,9 @@ function collectSources(sourceIds, jobDir) {
       fs.copyFileSync(src, dest);
       pdfSources.push({ name: rec.name, path: toPosix(dest) });
     } else {
-      textSources.push({ name: rec.name, kind: rec.kind, text: getSourceText(id) });
+      const text = getSourceText(id);
+      // 사진만 들어 있는 파일은 글 자료 목록에 넣지 않는다(빈 자료를 보여 줄 필요가 없다).
+      if (text.trim()) textSources.push({ name: rec.name, kind: rec.kind, text });
     }
   }
   return { textSources, pdfSources, skipped };
@@ -91,9 +95,10 @@ function uncoveredPoints(value, points) {
  * @param {(p:{phase:string, detail?:string, chars?:number})=>void} [o.onProgress]
  * @param {AbortSignal} [o.signal]
  * @param {(brand:string)=>Promise<string>} [o.lookupPartnership]
+ * @param {(sourceId:string, n:number)=>object|null} [o.useImage]  고른 사진을 사진첩에 넣어 준다
  * @param {typeof runClaude} [o.run]   테스트에서 가짜로 바꿔 끼운다
  */
-export async function generateBrief({ inputs, sourceIds = [], jobDir, onProgress = () => {}, signal, lookupPartnership, run = runClaude }) {
+export async function generateBrief({ inputs, sourceIds = [], jobDir, onProgress = () => {}, signal, lookupPartnership, useImage, run = runClaude }) {
   const inputErrs = validateInputs(inputs);
   if (inputErrs.length) throw new Error(inputErrs.join(' · '));
   fs.mkdirSync(jobDir, { recursive: true });
@@ -101,7 +106,14 @@ export async function generateBrief({ inputs, sourceIds = [], jobDir, onProgress
   onProgress({ phase: 'sources', detail: '자료 모으는 중' });
   const { textSources, pdfSources, skipped } = collectSources(sourceIds, jobDir);
   const warnings = skipped.map((s) => `자료를 쓰지 못했습니다: ${s}`);
+  const infos = [];
   const points = splitPoints(inputs.sellingPoints);
+
+  // 제품 사진 고르기는 글쓰기와 같이 돌린다 — 실패해도 기획서는 그대로 나온다(회색 자리로 남는다).
+  const candidates = collectCandidates(sourceIds);
+  const picking = candidates.length
+    ? pickProductImage({ candidates, inputs, jobDir, signal, run }).catch(() => null)
+    : Promise.resolve(null);
 
   const system = composeSystem();
   let feedback = '';
@@ -145,6 +157,20 @@ export async function generateBrief({ inputs, sourceIds = [], jobDir, onProgress
     break;
   }
 
+  let productAsset = null;
+  if (!candidates.length) onProgress({ phase: 'images', detail: '자료에 쓸 만한 사진이 없어 건너뜁니다' });
+  else {
+    onProgress({ phase: 'images', detail: `제품 사진 고르는 중 (후보 ${candidates.length}장)` });
+    const picked = await picking;
+    if (picked && useImage) {
+      try {
+        productAsset = useImage(picked.sourceId, picked.n);
+      } catch { /* 못 넣으면 회색 자리로 둔다 */ }
+    }
+    if (productAsset) infos.push(`제품 사진을 「${picked.from}」 에서 가져왔습니다${picked.why ? ` — ${picked.why}` : ''}. 다른 사진이면 눌러서 바꾸세요`);
+    else infos.push('사측 공유 파일에서 제품 사진을 찾지 못했습니다 — 회색 자리를 눌러 직접 넣어 주세요');
+  }
+
   onProgress({ phase: 'build', detail: '문서로 조립하는 중' });
   let partnershipUrl = '';
   if (lookupPartnership) {
@@ -154,12 +180,13 @@ export async function generateBrief({ inputs, sourceIds = [], jobDir, onProgress
   }
   if (!partnershipUrl) warnings.push(`「[${value.brandName}] … Partnership Ads」 안내 페이지를 찾지 못해 📢 박스의 파트너십 코드 줄을 뺐습니다 — 필요하면 박스를 눌러 추가하세요`);
 
-  const { doc, notes } = buildDoc(value, inputs, { partnershipUrl });
+  const { doc, notes } = buildDoc(value, inputs, { partnershipUrl, productAsset });
   return {
     doc,
     sourceNotes: String(value.sourceNotes ?? '').trim(),
     coverage: value.sellingPointCoverage ?? [],
     warnings: [...warnings, ...(value.warnings ?? []), ...notes],
+    infos,
     lint: lintDoc(doc, { plain: inline.plain }),
   };
 }

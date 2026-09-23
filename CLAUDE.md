@@ -46,7 +46,12 @@ OAuth 연결 자체를 확인할 때만 설치본을 멈추고 4325 로 띄운�
   뽑아 Claude 에게 보내고 같은 순서로 받아 되꽂는다. 해시태그·계정 태그는 그대로 둔다(`AS_IS_ROWS`).
 - `src/claude/` — Claude CLI 호출(구독 로그인, stream-json, --json-schema), JSON 추출.
 - `src/sources/` — 사측 공유 파일 읽기(docx·pptx·xlsx 는 의존성 없는 ZIP/XML 파서, PDF 는 Claude 가 직접 읽음, 노션 링크).
-- `src/brief/` — 작성·보정·문서 트리·편집/추가.
+  사진도 같이 꺼낸다: `images.js`(추려내기)·`pdf-images.js`(PDF 안의 사진 객체 → JPEG 그대로 / PNG 로 다시 포장,
+  투명도 `/SMask` 를 같이 넣지 않으면 오려낸 제품 컷 배경이 검게 나온다)·`imagemeta.js`(크기).
+- `src/brief/` — 작성·보정·문서 트리·편집/추가. 제품 사진은 `product-image.js` 에서 **Claude 가 후보를 보고** 고른다
+  (제일 큰 사진을 넣으면 십중팔구 배경 그라데이션이다). 글쓰기와 같이 돌려 기다림이 겹치지 않게 한다.
+- 고치는 길이 둘이다: 글자만 있는 자리는 `web/js/direct.js` 가 Claude 없이 바로(무엇을 직접 고칠 수 있는지는
+  그 파일에만 있다), 여러 조각이 얽힌 자리는 `src/brief/edit.js` 가 프롬프트로. 둘의 대상 판단은 짝이 맞아야 한다.
 - `src/notion/` — OAuth(파이널 리포트 공개 통합 재사용), 쓰기 가드, 블록 변환, 게시.
 - `web/` — Final Report 플러그인과 같은 모양의 화면(빌드 없음).
 - 데이터: `~/.content-brief-studio/` (`CBS_DIR` 로 바꿀 수 있음).

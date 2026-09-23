@@ -105,6 +105,14 @@ const readers = () => (oauth.status().connected
   ? { viaApi: (pageId) => readNotionViaApi(notionClient(), pageId) }
   : {});
 
+/** 자료에서 꺼낸 사진 한 장을 사진첩(assets)에 넣는다 — 문서가 가리키는 것은 늘 사진첩이다. */
+function useSourceImage(sourceId, n) {
+  const img = sources.readSourceImage(sourceId, n);
+  if (!img) return null;
+  const meta = store.saveAsset({ name: img.name, mime: img.mime, data: img.data });
+  return { id: meta.id, name: meta.name, mime: meta.mime, size: meta.size };
+}
+
 async function lookupPartnership(brand) {
   let children = [];
   if (oauth.status().connected) {
@@ -167,6 +175,14 @@ async function handleApi(req, res, url) {
     const ids = String(url.searchParams.get('ids') ?? '').split(',').filter(Boolean);
     return json(res, 200, { sources: ids.map((id) => sources.publicView(sources.getSource(id))).filter(Boolean) });
   }
+  // 자료에서 꺼낸 사진 — 사진 자리를 눌렀을 때 고르는 목록에 보여 준다.
+  if (m === 'GET' && /^\/api\/sources\/[^/]+\/images\/\d+$/.test(p)) {
+    const [, , , id, , n] = p.split('/');
+    const img = sources.readSourceImage(id, Number(n));
+    if (!img) return json(res, 404, { error: '없는 사진입니다.' });
+    res.writeHead(200, { 'content-type': img.mime, 'cache-control': 'private, max-age=86400' });
+    return res.end(img.data);
+  }
   if (m === 'GET' && p === '/api/drafts/current') return json(res, 200, { draft: store.currentDraft() });
   if (m === 'GET' && p === '/api/drafts') return json(res, 200, { drafts: store.listDrafts() });
   if (m === 'GET' && p.startsWith('/api/drafts/')) return json(res, 200, { draft: store.loadDraft(p.split('/').pop()) });
@@ -200,6 +216,13 @@ async function handleApi(req, res, url) {
     const body = await readJson(req);
     return json(res, 200, { source: sources.publicView(sources.addNotionLink(body.url, readers())) });
   }
+  // 자료에서 꺼낸 사진을 문서에 쓰겠다 — 사진첩으로 복사한다(자료를 지워도 문서에는 남게).
+  if (m === 'POST' && /^\/api\/sources\/[^/]+\/images\/\d+$/.test(p)) {
+    const [, , , id, , n] = p.split('/');
+    const asset = useSourceImage(id, Number(n));
+    if (!asset) return json(res, 404, { error: '없는 사진입니다.' });
+    return json(res, 200, { asset });
+  }
   if (m === 'DELETE' && p.startsWith('/api/sources/')) return json(res, 200, { ok: sources.removeSource(p.split('/').pop()) });
 
   if (m === 'PUT' && p.startsWith('/api/drafts/')) {
@@ -219,7 +242,7 @@ async function handleApi(req, res, url) {
   if (m === 'POST' && p === '/api/generate') {
     const body = await readJson(req);
     const job = startJob('generate', ({ progress, signal, dir }) => generateBrief({
-      inputs: body.inputs ?? {}, sourceIds: body.sourceIds ?? [], jobDir: dir, onProgress: progress, signal, lookupPartnership,
+      inputs: body.inputs ?? {}, sourceIds: body.sourceIds ?? [], jobDir: dir, onProgress: progress, signal, lookupPartnership, useImage: useSourceImage,
     }));
     return json(res, 200, { jobId: job.id });
   }

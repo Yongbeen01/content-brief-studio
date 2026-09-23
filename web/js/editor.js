@@ -1,9 +1,14 @@
 import { api, pollJob } from './api.js';
 import { getAt, removeAt } from './doc.js';
+import { directInsert, directTarget } from './direct.js';
 import { findByPath } from './preview.js';
 
 /**
- * 미리보기에서 누르면 고치고, 블록 사이를 누르면 추가한다. 둘 다 프롬프트로.
+ * 미리보기에서 누르면 고치고, 블록 사이를 누르면 추가한다.
+ *
+ * 고치는 방법은 두 가지다.
+ * - **직접 고치기**: 그 자리가 글자뿐이면 지금 글을 그대로 보여 주고 사람이 고쳐 쓴다(Claude 안 씀, 즉시).
+ * - **Claude 에게 시키기**: 프롬프트로 시킨다. 스텝 전체·박스처럼 조각이 얽힌 자리는 이쪽만 된다.
  *
  * AI 작업은 한 번에 하나다. 도는 동안에는 문서의 다른 변경(되돌리기·사진 교체·다른 편집)을 막는다 —
  * 서버는 보낸 순간의 문서에 고친 결과를 돌려주므로, 그 사이에 문서가 바뀌면 그 변경이 사라진다.
@@ -18,8 +23,13 @@ export function createEditor({ root, getDoc, getSourceNotes, commit, isLocked, s
   const applyBtn = $('edit_pop_apply');
   const cancelBtn = $('edit_pop_cancel');
   const deleteBtn = $('edit_pop_delete');
-  let target = null; // { mode: 'edit'|'insert', path | containerPath, index, el }
-  let running = null; // { jobId, timer }
+  const fieldsBox = $('edit_fields');
+  const aiBox = $('edit_ai');
+  const tabDirect = $('edit_tab_direct');
+  const tabAi = $('edit_tab_ai');
+  let target = null; // { mode: 'edit'|'insert', path | containerPath, index, el, direct }
+  let mode = 'ai'; // 'direct' | 'ai'
+  let running = null; // { jobId }
   let hoverEl = null;
 
   const setHover = (e) => {
@@ -67,23 +77,90 @@ export function createEditor({ root, getDoc, getSourceNotes, commit, isLocked, s
     pop.style.left = `${left}px`;
   }
 
+  // ── 직접 고치기 칸 ────────────────────────────────────────────────────────
+
+  function renderFields(direct) {
+    fieldsBox.replaceChildren();
+    if (!direct) return;
+    for (const f of direct.fields) {
+      const wrap = document.createElement('div');
+      wrap.className = 'edit-field';
+      const label = document.createElement('label');
+      label.textContent = f.label;
+      const input = document.createElement(f.kind === 'number' ? 'input' : 'textarea');
+      input.dataset.key = f.key;
+      if (f.kind === 'number') {
+        input.type = 'number';
+        input.min = '1';
+        input.max = '30';
+      } else if (f.kind === 'text' && !f.value.includes('\n')) {
+        input.rows = 2;
+      } else {
+        input.rows = Math.min(10, Math.max(3, f.value.split('\n').length + 1));
+      }
+      input.value = f.value;
+      label.htmlFor = input.id = `edit_field_${f.key}`;
+      wrap.append(label, input);
+      if (f.hint) {
+        const hint = document.createElement('div');
+        hint.className = 'edit-field-hint';
+        hint.textContent = f.hint;
+        wrap.append(hint);
+      }
+      fieldsBox.append(wrap);
+    }
+    if (direct.note) {
+      const note = document.createElement('div');
+      note.className = 'edit-note';
+      note.textContent = direct.note;
+      fieldsBox.append(note);
+    }
+  }
+
+  function fieldValues() {
+    return [...fieldsBox.querySelectorAll('[data-key]')].map((e) => e.value);
+  }
+
+  function setMode(next) {
+    if (!target) return;
+    mode = target.direct ? next : 'ai';
+    tabDirect.classList.toggle('is-on', mode === 'direct');
+    tabAi.classList.toggle('is-on', mode === 'ai');
+    fieldsBox.classList.toggle('hidden', mode !== 'direct');
+    aiBox.classList.toggle('hidden', mode === 'direct');
+    applyBtn.querySelector('.btn-text').textContent = mode === 'direct'
+      ? (target.mode === 'edit' ? '저장' : '추가')
+      : (target.mode === 'edit' ? '적용' : '추가');
+    $('edit_pop_hint').textContent = mode === 'direct'
+      ? 'Ctrl+Enter 로 저장 · Claude 를 쓰지 않아 바로 반영됩니다'
+      : 'Ctrl+Enter 로 적용';
+    status.textContent = '';
+    status.className = 'fx-status';
+    const first = mode === 'direct' ? fieldsBox.querySelector('[data-key]') : text;
+    setTimeout(() => first?.focus(), 0);
+  }
+
   function open(t) {
     close();
     target = t;
     t.el.classList.add('is-selected');
+    const doc = getDoc();
+    t.direct = t.mode === 'edit' ? directTarget(doc, t.path) : directInsert(doc, t.containerPath, t.index);
     $('edit_pop_title').textContent = t.mode === 'edit' ? '이 부분 고치기' : '여기에 추가하기';
     $('edit_pop_where').textContent = t.mode === 'edit' ? describe(t.path) : '두 블록 사이에 새 내용을 넣습니다.';
     text.value = '';
     text.placeholder = t.mode === 'edit'
       ? '예) 더 짧고 재밌게 / 성분 이름을 넣어 줘 / 한국어로 적어도 영어로 고쳐 줍니다'
       : '예) 여기에 주의 문구 박스 추가 / 제품 텍스처를 보여 주는 스텝 하나 추가';
+    tabDirect.textContent = t.mode === 'edit' ? '직접 고치기' : '직접 쓰기';
+    tabDirect.disabled = !t.direct;
+    tabDirect.title = t.direct ? '' : '여러 조각이 얽힌 자리라 Claude 에게 시켜야 합니다';
+    renderFields(t.direct);
     const deletable = t.mode === 'edit' && typeof t.path[t.path.length - 1] === 'number';
     deleteBtn.classList.toggle('hidden', !deletable);
-    status.textContent = '';
-    status.className = 'fx-status';
-    applyBtn.querySelector('.btn-text').textContent = t.mode === 'edit' ? '적용' : '추가';
+    pop.classList.remove('hidden');
+    setMode(t.direct ? 'direct' : 'ai'); // 먼저 모양을 정해야 높이가 맞는 자리에 뜬다
     place(t.el);
-    text.focus();
   }
 
   function close() {
@@ -101,8 +178,30 @@ export function createEditor({ root, getDoc, getSourceNotes, commit, isLocked, s
     cancelBtn.textContent = on ? '멈추기' : '취소';
   }
 
-  async function apply() {
-    if (!target || running) return;
+  /** Claude 없이 지금 글로 바꾼다. */
+  function applyDirect() {
+    const t = target;
+    const values = fieldValues();
+    if (!values.some((v) => String(v).trim())) {
+      status.className = 'fx-status bad';
+      status.textContent = t.mode === 'edit' ? '내용을 비울 수는 없습니다 — 지우려면 [삭제]를 누르세요.' : '넣을 내용을 적어 주세요.';
+      return;
+    }
+    try {
+      const next = t.direct.apply(getDoc(), values);
+      const flash = t.mode === 'edit' ? t.path : [...t.containerPath, t.index];
+      target = null;
+      pop.classList.add('hidden');
+      commit(next, { flashPath: flash });
+      toast(t.mode === 'edit' ? '고쳤습니다' : '넣었습니다');
+    } catch (e) {
+      target = t;
+      status.className = 'fx-status bad';
+      status.textContent = e.message;
+    }
+  }
+
+  async function applyAi() {
     const instruction = text.value.trim();
     if (!instruction) {
       status.textContent = target.mode === 'edit' ? '어떻게 고칠지 적어 주세요.' : '무엇을 추가할지 적어 주세요.';
@@ -151,8 +250,16 @@ export function createEditor({ root, getDoc, getSourceNotes, commit, isLocked, s
     }
   }
 
+  function apply() {
+    if (!target || running) return;
+    if (mode === 'direct' && target.direct) applyDirect();
+    else applyAi();
+  }
+
   applyBtn.addEventListener('click', apply);
-  text.addEventListener('keydown', (e) => {
+  tabDirect.addEventListener('click', () => setMode('direct'));
+  tabAi.addEventListener('click', () => setMode('ai'));
+  pop.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); apply(); }
     if (e.key === 'Escape') close();
   });

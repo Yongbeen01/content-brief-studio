@@ -14,6 +14,7 @@ import { chromeText } from '../web/js/chrome.js';
 import { collectTranslatable, applyTranslations, translateDoc } from '../src/brief/translate.js';
 import { inline } from '../src/brief/inline.js';
 import { resolveTarget, resolveInsert, runEdit, runInsert } from '../src/brief/edit.js';
+import { directTarget, directInsert } from '../web/js/direct.js';
 import { generateBrief, findPartnershipPage, validateInputs } from '../src/brief/generate.js';
 
 const sample = JSON.parse(fs.readFileSync(new URL('./fixtures/compose-sample.json', import.meta.url), 'utf8'));
@@ -225,6 +226,80 @@ test('편집 대상 종류', () => {
   assert.equal(resolveInsert(doc, ['nodes'], 5).kind, 'top');
   assert.equal(resolveInsert(doc, ['nodes', dos, 'children', 1, 'items'], 2).kind, 'grid');
   assert.equal(resolveInsert(doc, ['nodes', 0, 'children'], 1).kind, 'callout');
+});
+
+test('직접 고치기 — 글자만 있는 자리는 Claude 없이 바로 바뀐다', () => {
+  const doc = build();
+
+  // 목록: 한 줄에 하나, 빈 줄은 버린다
+  const li = doc.nodes.findIndex((n) => n.type === 'bulleted');
+  const list = directTarget(doc, ['nodes', li]);
+  assert.equal(list.fields[0].kind, 'lines');
+  assert.deepEqual(getAt(list.apply(doc, ['첫 줄\n  둘째 줄  \n\n']), ['nodes', li]).items, ['첫 줄', '둘째 줄']);
+
+  // 고정 문구도 직접 고칠 수 있다. 고치면 표시가 떨어져 나가 영어본은 옮기기로 만들어진다.
+  const p = ['nodes', 0, 'children', 0];
+  const fixed = directTarget(doc, p);
+  assert.match(fixed.fields[0].value, /가이드를 꼭 지켜/);
+  assert.match(fixed.note, /영어로 옮깁니다/);
+  const changed = getAt(fixed.apply(doc, ['**이 가이드대로 찍어 주세요.**']), p);
+  assert.equal(changed.chrome, undefined);
+  assert.equal(nodeText(changed, 'en'), '**이 가이드대로 찍어 주세요.**');
+
+  // 스텝의 한 칸 · 시간(1~30초로 맞춘다)
+  const si = doc.nodes.findIndex((n) => n.type === 'step');
+  assert.equal(directTarget(doc, ['nodes', si, 'action']).fields[0].label, chromeText('stepAction', 'ko'));
+  const secs = directTarget(doc, ['nodes', si, 'seconds']);
+  assert.equal(getAt(secs.apply(doc, ['99']), ['nodes', si, 'seconds']), 30);
+  assert.equal(getAt(secs.apply(doc, ['7']), ['nodes', si, 'seconds']), 7);
+
+  // 표 한 줄 — 항목 이름 칸(고정 문구)은 건드리지 않는다
+  const ov = doc.nodes.findIndex((n) => n.role === 'overview');
+  const row = directTarget(doc, ['nodes', ov, 'rows', 3]);
+  assert.equal(row.fields.length, 1);
+  assert.equal(row.fields[0].label, chromeText('ovCaption', 'ko'));
+  assert.deepEqual(getAt(row.apply(doc, ['새 캡션']), ['nodes', ov, 'rows', 3]), ['Caption', '새 캡션']);
+
+  // Don't 항목 — 코드가 채운 표준 문구도 고칠 수 있다
+  const dont = doc.nodes.findIndex((n) => n.role === 'donts');
+  const std = ['nodes', dont, 'children', 1, 'items', 2];
+  const item = directTarget(doc, std);
+  assert.equal(item.fields[0].value, chromeText(getAt(doc, std).chrome, 'ko'));
+  const after = getAt(item.apply(doc, ['DO NOT 가로로 찍기', '세로 9:16 로만.']), std);
+  assert.deepEqual([after.chrome, after.title, after.desc], [undefined, 'DO NOT 가로로 찍기', '세로 9:16 로만.']);
+
+  // 금지 표현 표는 「쓰지 말 것 | 대신 쓸 말」 한 줄씩
+  const wt = doc.nodes.findIndex((n) => n.type === 'wordTable');
+  const words = directTarget(doc, ['nodes', wt]);
+  assert.match(words.fields[1].value, /treats dullness \| helps the look of dullness/);
+  assert.deepEqual(getAt(words.apply(doc, ['설명', 'cures acne | helps with blemishes\n | 버릴 줄']), ['nodes', wt]).rows,
+    [{ dont: 'cures acne', instead: 'helps with blemishes' }]);
+
+  // 여러 조각이 얽힌 자리는 프롬프트로만 고친다
+  assert.equal(directTarget(doc, ['nodes', si]), null); // 스텝 전체
+  assert.equal(directTarget(doc, ['nodes', 0]), null); // 박스
+  assert.equal(directTarget(doc, ['nodes', ov]), null); // 표 전체
+  assert.equal(directTarget(doc, ['nodes', 3]), null); // 사진 자리
+  assert.equal(directTarget(doc, ['nodes', 99]), null); // 없는 자리
+});
+
+test('직접 쓰기 — 블록 사이·박스 안·Do 목록에 바로 넣는다', () => {
+  const doc = build();
+  const between = directInsert(doc, ['nodes'], 5);
+  const two = between.apply(doc, ['첫 문단\n둘째 문단']);
+  assert.deepEqual(two.nodes.slice(5, 7).map((n) => [n.type, n.text]), [['paragraph', '첫 문단'], ['paragraph', '둘째 문단']]);
+  assert.ok(two.nodes[5].id);
+
+  const dos = doc.nodes.findIndex((n) => n.role === 'dos');
+  const inBox = directInsert(doc, ['nodes', 0, 'children'], 1);
+  assert.equal(inBox.apply(doc, ['한 줄']).nodes[0].children[1].text, '한 줄');
+
+  const grid = directInsert(doc, ['nodes', dos, 'children', 1, 'items'], 0);
+  assert.deepEqual(grid.fields.map((f) => f.label), ['제목', '설명 한 줄']);
+  const added = getAt(grid.apply(doc, ['제품을 크게', '얼굴보다 제품이 크게 보이게.']), ['nodes', dos, 'children', 1, 'items', 0]);
+  assert.deepEqual(added, { title: '제품을 크게', desc: '얼굴보다 제품이 크게 보이게.' });
+
+  assert.equal(directInsert(doc, ['nodes', 1, 'children', 0, 'text'], 0), null);
 });
 
 test('편집·추가 — 가짜 Claude 로 한 바퀴', async () => {

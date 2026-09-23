@@ -76,6 +76,7 @@ function newDraft() {
     doc: null,
     sourceNotes: '',
     warnings: [],
+    infos: [],
     published: [],
   };
 }
@@ -253,7 +254,8 @@ function renderWarnings() {
   const doc = currentDoc();
   const live = doc ? lintDoc(doc, { plain: inline.plain }) : [];
   const gen = (state.draft.warnings ?? []).map((t) => ({ level: 'warn', text: t }));
-  const all = [...live.filter((w) => w.level === 'warn'), ...gen, ...live.filter((w) => w.level === 'info')];
+  const infos = (state.draft.infos ?? []).map((t) => ({ level: 'info', text: t }));
+  const all = [...live.filter((w) => w.level === 'warn'), ...gen, ...infos, ...live.filter((w) => w.level === 'info')];
   const list = $('warn_list');
   list.replaceChildren(...all.map((w) => {
     const li = document.createElement('li');
@@ -332,6 +334,7 @@ function undo() {
 const PHASES = [
   { key: 'sources', label: '자료 모으기' },
   { key: 'compose', label: '기획서 쓰기 (Claude)' },
+  { key: 'images', label: '제품 사진 고르기' },
   { key: 'build', label: '검토·조립' },
 ];
 
@@ -410,6 +413,7 @@ async function generate() {
       commitDoc(r.doc);
       state.draft.sourceNotes = r.sourceNotes;
       state.draft.warnings = r.warnings ?? [];
+      state.draft.infos = r.infos ?? [];
       renderPreview();
       scheduleSave();
       $('progress_title').textContent = `다 만들었습니다 (${fmtElapsed(Date.now() - started)})`;
@@ -482,10 +486,66 @@ async function toggleLang() {
 // ── 사진 자리 ───────────────────────────────────────────────────────────────
 
 let slotTarget = null;
-function onSlotClick(path, el) {
-  slotTarget = { path, el };
+
+/** 지금 초안에 붙은 사측 공유 파일에서 꺼낸 사진 전부. */
+function sourcePhotos() {
+  const out = [];
+  for (const id of state.draft.sourceIds) {
+    const s = state.sources.get(id);
+    for (const im of s?.images ?? []) out.push({ ...im, sourceId: id, from: s.name });
+  }
+  return out;
+}
+
+function pickFromPc() {
   $('slot_file').value = '';
   $('slot_file').click();
+}
+
+/**
+ * 사진 자리를 누르면 — 사측 공유 파일에서 꺼낸 사진이 있으면 그중에서 고르고,
+ * 없으면 예전처럼 바로 내 컴퓨터에서 고른다.
+ */
+function onSlotClick(path, el) {
+  slotTarget = { path, el };
+  const photos = sourcePhotos();
+  if (!photos.length) return pickFromPc();
+  const node = getAt(state.draft.doc, path) ?? {};
+  const what = node.slot === 'product' ? '제품 이미지' : node.label || '사진';
+  $('slot_where').textContent = `「${what}」 자리 — 사측 공유 파일에서 찾은 사진입니다. 누르면 그 자리에 들어갑니다.`;
+  $('slot_grid').replaceChildren(...photos.map((im) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'slot-pick';
+    const img = document.createElement('img');
+    img.src = `/api/sources/${im.sourceId}/images/${im.n}`;
+    img.alt = `${im.from} 의 사진 ${im.n}`;
+    img.loading = 'lazy';
+    const cap = document.createElement('span');
+    cap.textContent = `${im.width}×${im.height} · ${im.from}`;
+    cap.title = im.from;
+    btn.append(img, cap);
+    btn.addEventListener('click', () => useSourcePhoto(im, btn));
+    return btn;
+  }));
+  openDialog('slot_dialog');
+}
+
+async function useSourcePhoto(im, btn) {
+  if (!slotTarget) return;
+  const { path } = slotTarget;
+  btn.classList.add('is-busy');
+  try {
+    const { asset } = await api('POST', `/api/sources/${im.sourceId}/images/${im.n}`);
+    const node = getAt(state.draft.doc, path);
+    slotTarget = null;
+    $('slot_dialog').close();
+    commitDoc(setAt(state.draft.doc, path, { ...node, asset }));
+    toast('사진을 넣었습니다');
+  } catch (e) {
+    toast(e.message, true);
+    btn.classList.remove('is-busy');
+  }
 }
 
 async function onSlotFile() {
@@ -766,6 +826,7 @@ async function loadDraft() {
   state.draft.sourceIds ??= [];
   state.draft.published ??= [];
   state.draft.warnings ??= [];
+  state.draft.infos ??= [];
   fillForm(state.draft.inputs);
   if (state.draft.sourceIds.length) {
     const { sources } = await api('GET', `/api/sources?ids=${state.draft.sourceIds.join(',')}`);
@@ -836,6 +897,7 @@ function wire() {
     b.addEventListener('click', () => { if (!b.disabled) b.closest('dialog').close(); });
   }
   $('slot_file').addEventListener('change', onSlotFile);
+  $('slot_from_pc').addEventListener('click', () => { $('slot_dialog').close(); pickFromPc(); });
   document.addEventListener('keydown', (e) => {
     const inField = /^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName);
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !inField && !e.shiftKey) { e.preventDefault(); undo(); }

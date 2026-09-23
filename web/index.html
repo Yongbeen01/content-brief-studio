@@ -138,7 +138,14 @@
       <button type="button" class="fx-overlay-close" id="edit_pop_close" aria-label="닫기"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
     </div>
     <div class="edit-pop-where" id="edit_pop_where"></div>
-    <textarea id="edit_pop_text" placeholder="예) 더 짧고 재밌게 / 성분 이름을 넣어 줘 / 이 스텝을 두 개로 나눠 줘"></textarea>
+    <div class="edit-tabs" id="edit_tabs" role="tablist">
+      <button type="button" class="edit-tab" id="edit_tab_direct" role="tab">직접 고치기</button>
+      <button type="button" class="edit-tab" id="edit_tab_ai" role="tab">Claude 에게 시키기</button>
+    </div>
+    <div class="edit-fields hidden" id="edit_fields"></div>
+    <div id="edit_ai">
+      <textarea id="edit_pop_text" placeholder="예) 더 짧고 재밌게 / 성분 이름을 넣어 줘 / 이 스텝을 두 개로 나눠 줘"></textarea>
+    </div>
     <div class="edit-pop-actions">
       <button type="button" class="primary-btn" id="edit_pop_apply"><span class="btn-text">적용</span><span class="loader"></span></button>
       <button type="button" class="secondary-btn" id="edit_pop_cancel">취소</button>
@@ -198,6 +205,23 @@
       <div class="fx-overlay-actions">
         <button type="button" class="secondary-btn" data-close id="publish_cancel">취소</button>
         <button type="button" class="primary-btn" id="publish_go"><span class="btn-text">노션에 만들기</span><span class="loader"></span></button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 사진 고르기 — 사측 공유 파일에서 꺼낸 사진이 있을 때 -->
+  <dialog class="fx-overlay fx-modal wide" id="slot_dialog">
+    <div class="fx-overlay-head">사진 고르기 <span class="fx-spacer"></span>
+      <button type="button" class="fx-overlay-close" data-close aria-label="닫기"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    </div>
+    <div class="fx-overlay-body">
+      <p class="fx-help" id="slot_where">사측 공유 파일에서 찾은 사진입니다. 누르면 그 자리에 들어갑니다.</p>
+      <div class="slot-grid" id="slot_grid"></div>
+    </div>
+    <div class="fx-overlay-foot">
+      <div class="fx-overlay-actions">
+        <button type="button" class="secondary-btn" data-close>취소</button>
+        <button type="button" class="primary-btn" id="slot_from_pc">내 컴퓨터에서 고르기</button>
       </div>
     </div>
   </dialog>

@@ -93,7 +93,7 @@ export function headerLines({ uploadUrl, partnershipUrl, tiktokUrl, amazonUrl })
 /**
  * @param {object} c       작성 결과(COMPOSE 스키마)
  * @param {object} inputs  폼 입력 { briefName, uploadUrl, tiktokUrl, amazonUrl, accountId, sellingPoints, concept }
- * @param {object} ctx     { partnershipUrl }
+ * @param {object} ctx     { partnershipUrl, productAsset }
  * @returns {{ doc: object, notes: string[] }}  notes = 코드가 보정한 내역(화면 경고에 보탠다)
  */
 export function buildDoc(c, inputs, ctx = {}) {
@@ -116,7 +116,9 @@ export function buildDoc(c, inputs, ctx = {}) {
     { role: 'header-links' }));
 
   nodes.push(Hc(1, 'sec1', { product: productTitle(brand, c.productName) }, { role: 'section-1' }));
-  nodes.push({ type: 'image', id: uid(), slot: 'product', label: '제품 이미지', ratio: 1.5 });
+  // 제품 사진은 사측 공유 파일에서 찾아 넣는다. 못 찾았으면 회색 자리로 두고 사람이 첨부한다.
+  const productAsset = ctx.productAsset ?? null;
+  nodes.push({ type: 'image', id: uid(), slot: 'product', label: '제품 이미지', ratio: 1.5, ...(productAsset ? { asset: productAsset } : {}) });
   nodes.push(Hc(3, 'whatIsIt'));
   nodes.push({ type: 'bulleted', id: uid(), items: c.whatIsIt.map((s) => String(s).trim()) });
   nodes.push(Hc(3, 'howToUse'));

@@ -455,6 +455,37 @@ details.card[open] > summary .fx-chevron { transform: rotate(180deg); }
 .edit-pop-actions .primary-btn { width: auto; flex: 1 1 auto; }
 .edit-pop-hint { font-size: 0.78rem; color: var(--fx-text-weaker); }
 
+/* 직접 고치기 ↔ Claude 에게 시키기 */
+.edit-tabs { display: flex; gap: 4px; background: var(--fx-fill); border-radius: var(--fx-r-sm); padding: 3px; }
+.edit-tab {
+  flex: 1 1 0; min-width: 0;
+  border: 0; background: none; cursor: pointer;
+  font: inherit; font-size: 0.85rem; color: var(--fx-text-weak);
+  border-radius: 6px; padding: 5px 8px;
+}
+.edit-tab:hover:not(:disabled) { color: var(--fx-text); }
+.edit-tab.is-on { background: var(--fx-card); color: var(--fx-text); font-weight: 600; }
+.edit-tab:disabled { opacity: 0.45; cursor: not-allowed; }
+.edit-fields { display: flex; flex-direction: column; gap: 8px; max-height: 46vh; overflow-y: auto; }
+.edit-field { display: flex; flex-direction: column; gap: 3px; }
+.edit-field > label { font-size: 0.8rem; font-weight: 600; color: var(--fx-text-weak); }
+.edit-field textarea { min-height: 54px; }
+.edit-field-hint { font-size: 0.75rem; color: var(--fx-text-weaker); }
+.edit-note { font-size: 0.78rem; color: var(--fx-warning); }
+
+/* 사진 고르기 — 사측 공유 파일에서 꺼낸 사진들 */
+.fx-modal.wide { max-width: 720px; }
+.slot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+.slot-pick {
+  border: 1px solid var(--fx-input-stroke); background: var(--fx-card);
+  border-radius: var(--fx-r-sm); padding: 6px; cursor: pointer;
+  display: flex; flex-direction: column; gap: 5px; text-align: center;
+}
+.slot-pick:hover { border-color: var(--fx-blue); }
+.slot-pick img { width: 100%; height: 120px; object-fit: contain; background: var(--fx-fill); border-radius: 4px; }
+.slot-pick span { font-size: 0.74rem; color: var(--fx-text-weaker); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slot-pick.is-busy { opacity: 0.5; pointer-events: none; }
+
 /* ── 알림 ────────────────────────────────────────────────── */
 .toast {
   position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
