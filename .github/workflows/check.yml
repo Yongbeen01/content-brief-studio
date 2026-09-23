@@ -19,6 +19,7 @@ jobs:
       - name: 문법
         run: for f in src/*.js src/*/*.js web/js/*.js; do node --check "$f"; done
 
+      # npm test = 바로 node --test. Node 20 은 --test 에 글롭을 못 받아 인자 없이 훑게 둔다.
       - name: 단위 테스트 (시크릿 검사 포함)
         run: npm test
 
