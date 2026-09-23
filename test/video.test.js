@@ -12,7 +12,7 @@ const { parseWhisperJson, speechBlock } = await import('../src/media/speech.js')
 const { makeGifWithin, parseProgress } = await import('../src/media/ffmpeg.js');
 const store = await import('../src/video/store.js');
 const { cleanFrames } = await import('../src/video/prepare.js');
-const { cleanCandidates, matchClip, stepSummary, wantSeconds } = await import('../src/video/match.js');
+const { cleanCandidates, cleanSequence, matchClip, stepSummary, wantSeconds } = await import('../src/video/match.js');
 const { buildDoc } = await import('../src/brief/build.js');
 
 const sample = JSON.parse(fs.readFileSync(new URL('./fixtures/compose-sample.json', import.meta.url), 'utf8'));
@@ -62,20 +62,53 @@ test('화면 설명 다듬기 — 범위 밖·중복·빈 줄은 버리고 순�
 });
 
 test('후보 구간 다듬기 — 길이·범위·겹침을 코드가 맞춘다', () => {
+  const videos = [{ id: 'v1', name: 'a.mp4', durationSec: 120 }];
   const out = cleanCandidates([
-    { start: 3, end: 30, why: '너무 김', confidence: 0.9 },
-    { start: 3.2, end: 8, why: '앞 것과 겹침' },
-    { start: 12, end: 12.5, why: '너무 짧음', confidence: 2 },
-    { start: 118, end: 130, why: '영상 밖' },
-    { start: 50, end: 55, why: '네 번째라 잘림' },
-  ], { durationSec: 120 });
+    { video: 1, start: 3, end: 30, why: '너무 김', confidence: 0.9 },
+    { video: 1, start: 3.2, end: 8, why: '앞 것과 겹침' },
+    { video: 1, start: 12, end: 12.5, why: '너무 짧음', confidence: 2 },
+    { video: 1, start: 118, end: 130, why: '영상 밖' },
+    { video: 1, start: 50, end: 55, why: '네 번째라 잘림' },
+  ], { videos });
   assert.equal(out.length, 3);
-  assert.deepEqual(out[0], { start: 3, end: 13, why: '너무 김', confidence: 0.9 }); // 10초로 자름
-  assert.deepEqual(out[1], { start: 12, end: 15, why: '너무 짧음', confidence: 1 }); // 3초로 늘림
-  assert.deepEqual(out[2], { start: 110, end: 120, why: '영상 밖', confidence: null }); // 영상 안으로
+  assert.equal(out[0].videoId, 'v1');
+  assert.deepEqual([out[0].start, out[0].end, out[0].confidence], [3, 13, 0.9]); // 10초로 자름
+  assert.deepEqual([out[1].start, out[1].end, out[1].confidence], [12, 15, 1]); // 3초로 늘림
+  assert.deepEqual([out[2].start, out[2].end], [110, 120]); // 영상 안으로
   // 영상이 최소 길이보다 짧으면 그 영상 전체
-  assert.deepEqual(cleanCandidates([{ start: 0, end: 9, why: 'x' }], { durationSec: 2 }), [{ start: 0, end: 2, why: 'x', confidence: null }]);
-  assert.deepEqual(cleanCandidates([{ start: 'a', end: 'b', why: 'x' }], { durationSec: 10 }), []);
+  assert.deepEqual(
+    cleanCandidates([{ video: 1, start: 0, end: 9, why: 'x' }], { videos: [{ id: 'v1', name: 'a', durationSec: 2 }] })[0].end,
+    2,
+  );
+  assert.deepEqual(cleanCandidates([{ video: 1, start: 'a', end: 'b', why: 'x' }], { videos }), []);
+  // 없는 영상 번호는 버린다(영상이 하나뿐일 때만 그 하나로 본다)
+  assert.deepEqual(cleanCandidates([{ video: 5, start: 1, end: 5, why: 'x' }], { videos: [{ id: 'v1', name: 'a', durationSec: 60 }, { id: 'v2', name: 'b', durationSec: 60 }] }), []);
+});
+
+test('이어 붙이기 제안 — 조각 길이·전체 길이·영상 섞기', () => {
+  const videos = [{ id: 'v1', name: 'a.mp4', durationSec: 20 }, { id: 'v2', name: 'b.mp4', durationSec: 15 }];
+  const seq = cleanSequence({
+    parts: [
+      { video: 1, start: 0, end: 2, why: '프로필' },
+      { video: 1, start: 3, end: 30, why: '너무 긴 조각' },
+      { video: 2, start: 6, end: 9, why: '다른 영상 조각' },
+    ],
+    why: '세 장면을 순서대로',
+    confidence: 0.82,
+  }, { videos });
+  assert.deepEqual(seq.parts.map((p) => [p.videoId, p.start, p.end]), [['v1', 0, 2], ['v1', 3, 9], ['v2', 6, 9]]);
+  assert.equal(seq.seconds, 11); // 2 + 6 + 3
+  assert.equal(seq.confidence, 0.82);
+  // 전체 한도를 넘으면 뒤쪽을 버린다
+  const long = cleanSequence({
+    parts: [{ video: 1, start: 0, end: 6, why: 'a' }, { video: 1, start: 7, end: 13, why: 'b' }, { video: 1, start: 14, end: 20, why: 'c' }],
+    why: 'x',
+  }, { videos });
+  assert.equal(long.parts.length, 2);
+  assert.equal(long.seconds, 12);
+  // 조각이 하나뿐이면 이어 붙일 게 아니다
+  assert.equal(cleanSequence({ parts: [{ video: 1, start: 0, end: 3, why: 'a' }], why: 'x' }, { videos }), null);
+  assert.equal(cleanSequence(null, { videos }), null);
 });
 
 test('스텝 글 — 구간 고르기의 기준이 되는 글', () => {
@@ -159,34 +192,54 @@ test('영상 보관 — 형식·크기 검사, 꺼낸 것 다시 읽기', () => 
   assert.equal(store.getVideo(rec.id), null);
 });
 
-test('구간 고르기 — 스텝 글과 화면 설명을 보내고, 답은 다듬어 돌려준다', async () => {
-  const rec = store.addVideo({ name: 'clip.mp4', data: Buffer.alloc(2048, 1), draftId: 'd2' });
-  store.update(rec.id, { status: 'ready', durationSec: 40, usedSec: 40 });
-  store.writeFrames(rec.id, [{ t: 0, desc: '제품을 든 손' }, { t: 5, desc: '텍스처 클로즈업' }]);
-  store.writeSpeech(rec.id, [{ start: 1, end: 2, text: '이거 보세요' }]);
+test('구간 고르기 — 영상 여러 개를 함께 보고, 답은 다듬어 돌려준다', async () => {
+  const a = store.addVideo({ name: 'clipA.mp4', data: Buffer.alloc(2048, 1), draftId: 'd2' });
+  const b = store.addVideo({ name: 'clipB.mp4', data: Buffer.alloc(2048, 2), draftId: 'd2' });
+  for (const [v, sec] of [[a, 40], [b, 20]]) {
+    store.update(v.id, { status: 'ready', durationSec: sec, usedSec: sec });
+    store.writeFrames(v.id, [{ t: 0, desc: `${v.name} 첫 장면` }, { t: 5, desc: '텍스처 클로즈업' }]);
+    store.writeSpeech(v.id, [{ start: 1, end: 2, text: '이거 보세요' }]);
+  }
 
   const seen = [];
   const r = await matchClip({
-    videoId: rec.id,
+    videoIds: [a.id, b.id],
     doc,
     path: slotPath,
     jobDir: tmp(),
     run: async (o) => {
       seen.push(o);
-      return { structured: { candidates: [{ start: 5, end: 60, why: '길이 넘침', confidence: 0.8 }] }, text: '' };
+      return {
+        structured: {
+          singles: [{ video: 2, start: 5, end: 60, why: '길이 넘침', confidence: 0.4 }],
+          sequence: {
+            parts: [{ video: 1, start: 0, end: 3, why: '앞' }, { video: 2, start: 2, end: 5, why: '뒤' }],
+            why: '두 영상을 이어',
+            confidence: 0.8,
+          },
+        },
+        text: '',
+      };
     },
   });
   assert.equal(seen.length, 1);
-  assert.match(seen[0].prompt, /0s 제품을 든 손/);
-  assert.match(seen[0].prompt, /1.0–2.0 이거 보세요/);
-  assert.match(seen[0].prompt, /제목: Step 1 \(HOOK\)/);
-  assert.match(seen[0].prompt, /Aim for about 4 seconds/);
-  assert.deepEqual(seen[0].tools, undefined); // 도구 없이 글만 보고 고른다
-  assert.deepEqual(r.candidates, [{ start: 5, end: 15, why: '길이 넘침', confidence: 0.8 }]);
+  assert.ok(seen[0].prompt.includes("## Video 1: clipA.mp4 (0–40s)"), seen[0].prompt.slice(0, 120));
+  assert.ok(seen[0].prompt.includes("## Video 2: clipB.mp4 (0–20s)"), seen[0].prompt.slice(0, 120));
+  assert.ok(seen[0].prompt.includes("제목: Step 1 (HOOK)"), seen[0].prompt.slice(0, 120));
+  assert.ok(seen[0].prompt.includes("Aim for about 4 seconds"), seen[0].prompt.slice(0, 120));
+  assert.ok(seen[0].prompt.includes("Use it when no single clip covers the step"), seen[0].prompt.slice(0, 120));
+  // 한 구간짜리: 2번 영상(20초) 안으로 잘린다
+  assert.deepEqual(
+    r.singles.map((c) => [c.videoId, c.start, c.end]),
+    [[b.id, 5, 15]], // 20초 영상 안에서 10초로 잘렸다
+  );
+  // 이어 붙이기: 조각마다 영상이 다르다
+  assert.deepEqual(r.sequence.parts.map((p) => [p.videoId, p.start, p.end]), [[a.id, 0, 3], [b.id, 2, 5]]);
+  assert.equal(r.sequence.seconds, 6);
 
   // 준비 안 된 영상은 막는다
-  const fresh = store.addVideo({ name: 'new.mp4', data: Buffer.alloc(2048, 1) });
-  await assert.rejects(matchClip({ videoId: fresh.id, doc, path: slotPath, jobDir: tmp(), run: async () => ({}) }), /준비되지 않았습니다/);
+  const fresh = store.addVideo({ name: 'new.mp4', data: Buffer.alloc(2048, 3) });
+  await assert.rejects(matchClip({ videoIds: [fresh.id], doc, path: slotPath, jobDir: tmp(), run: async () => ({}) }), /준비되지 않았습니다/);
 });
 
 test('같은 영상을 다시 올리면 이미 올린 것을 쓴다 — 화면 읽기는 한 번', async () => {

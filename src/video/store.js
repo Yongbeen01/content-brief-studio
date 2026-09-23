@@ -23,7 +23,10 @@ const mem = new Map();
 export const videoDir = (id) => (safeId(id) ? dirOf(id) : '');
 export const sourcePath = (id) => path.join(dirOf(id), 'source.mp4');
 export const sheetsDir = (id) => path.join(dirOf(id), 'sheets');
-export const previewPath = (id, n) => path.join(dirOf(id), 'previews', `${n}.mp4`);
+/** 미리보기 이름: 한 구간짜리는 s1·s2·s3, 이어 붙인 것은 seq. */
+export const previewPath = (id, name) => (/^[a-z0-9]{1,6}$/.test(String(name))
+  ? path.join(dirOf(id), 'previews', `${name}.mp4`)
+  : '');
 
 export function kindOf(name) {
   return VIDEO_EXT[path.extname(String(name)).toLowerCase()] ?? null;

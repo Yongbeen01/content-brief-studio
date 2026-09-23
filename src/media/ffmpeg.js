@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { killTree } from '../claude/cli.js';
+import { killTree, toPosix } from '../claude/cli.js';
 import { ensureFfmpeg } from './tools.js';
 
 /**
@@ -113,6 +113,46 @@ export async function previewMp4(src, dest, { start, end, ...opts }) {
     '-vf', 'scale=360:-2', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', dest,
   ], opts);
   return dest;
+}
+
+/**
+ * 여러 구간을 하나로 이어 붙인다 — 다른 영상에서 가져온 조각이어도 된다.
+ *
+ * 조각마다 **크기·fps 를 먼저 맞춘 뒤** 이어 붙인다. 필터 하나로 한 번에 묶으면 크기가 다른 영상에서
+ * 소리 없이 깨진다(요청서의 경고). 크기는 첫 조각을 기준으로 하고, 비율이 다른 조각은 검은 여백을 넣는다.
+ * @param {{file:string,start:number,end:number}[]} parts
+ */
+export async function stitch(parts, dest, { workDir, fps = 15, maxWidth = 720, ...opts }) {
+  if (!parts?.length) throw new MediaError('이어 붙일 구간이 없습니다.');
+  const { ffmpeg } = await tools(opts);
+  fs.mkdirSync(workDir, { recursive: true });
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  const first = await probe(parts[0].file, opts);
+  const W = Math.max(2, Math.min(maxWidth, first.width - (first.width % 2)));
+  const H = Math.max(2, Math.round(((W * first.height) / first.width) / 2) * 2);
+  const files = [];
+  for (const [i, part] of parts.entries()) {
+    const out = path.join(workDir, `part-${i + 1}.mp4`);
+    const vf = [
+      `fps=${fps}`,
+      `scale=${W}:${H}:force_original_aspect_ratio=decrease`,
+      `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black`,
+      'setsar=1',
+    ].join(',');
+    await run(ffmpeg, [
+      '-y', '-ss', String(part.start), '-i', part.file, '-t', String(Math.max(0.3, part.end - part.start)),
+      '-an', '-vf', vf, '-c:v', 'libx264', '-crf', '22', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', out,
+    ], opts);
+    files.push(out);
+  }
+  if (files.length === 1) {
+    fs.copyFileSync(files[0], dest);
+    return { file: dest, width: W, height: H };
+  }
+  const list = path.join(workDir, 'list.txt');
+  fs.writeFileSync(list, files.map((f) => `file '${toPosix(f)}'`).join('\n'), 'utf8');
+  await run(ffmpeg, ['-y', '-f', 'concat', '-safe', '0', '-i', list, '-c', 'copy', dest], opts);
+  return { file: dest, width: W, height: H };
 }
 
 /** 16kHz 모노 wav — 받아쓰기(whisper.cpp)가 받는 유일한 모양이다. */

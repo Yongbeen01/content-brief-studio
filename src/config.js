@@ -50,6 +50,10 @@ const DEFAULTS = {
     sheetCells: 12,              // 3x4 격자 한 장에 12초
     clipMinSec: 3,
     clipMaxSec: 10,
+    // 여러 구간을 이어 붙일 때 — 조각 하나의 길이와 전체 길이
+    partMinSec: 1.5,
+    partMaxSec: 6,
+    seqMaxSec: 12,
     gifWidth: 480,
     gifFps: 12,
     gifMaxBytes: 8 * 1024 * 1024, // 넘으면 품질을 낮춰 다시 만든다

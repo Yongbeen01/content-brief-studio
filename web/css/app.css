@@ -553,6 +553,12 @@ details.card[open] > summary .fx-chevron { transform: rotate(180deg); }
 }
 .clip-cand:hover { border-color: var(--fx-blue); }
 .clip-cand video { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #000; border-radius: 6px; }
+/* 이어 붙인 제안은 맨 위에 한 줄로 크게 */
+.clip-seq { grid-column: 1 / -1; flex-direction: row; gap: 12px; border-color: var(--fx-blue-weaker); background: var(--fx-blue-weakest); }
+.clip-seq video { width: 240px; flex: none; }
+.clip-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1 1 auto; }
+.clip-parts { font-size: 0.75rem !important; color: var(--fx-text-weaker) !important; }
+.clip-manual select { width: auto; max-width: 180px; }
 .clip-cand b { font-size: 0.8rem; }
 .clip-cand span { font-size: 0.8rem; color: var(--fx-text-weak); line-height: 1.4; flex: 1 1 auto; }
 .clip-cand .vp-btn { margin-top: 2px; }

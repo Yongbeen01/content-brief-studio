@@ -197,9 +197,9 @@ async function handleApi(req, res, url) {
     return json(res, 200, { videos: list });
   }
   // 후보 미리보기(소리 없는 작은 mp4) — 화면에서 <video> 로 돌려 본다.
-  if (m === 'GET' && /^\/api\/videos\/[^/]+\/preview\/\d+$/.test(p)) {
-    const [, , , id, , n] = p.split('/');
-    const file = videos.previewPath(id, Number(n));
+  if (m === 'GET' && /^\/api\/videos\/[^/]+\/preview\/[a-z0-9]{1,6}$/.test(p)) {
+    const [, , , id, , name] = p.split('/');
+    const file = videos.previewPath(id, name);
     if (!file || !fs.existsSync(file)) return json(res, 404, { error: '없는 미리보기입니다.' });
     const data = fs.readFileSync(file);
     res.writeHead(200, { 'content-type': 'video/mp4', 'content-length': data.length, 'cache-control': 'private, max-age=600' });
@@ -278,20 +278,27 @@ async function handleApi(req, res, url) {
     preparing.set(id, job.id);
     return json(res, 200, { jobId: job.id });
   }
-  if (m === 'POST' && /^\/api\/videos\/[^/]+\/match$/.test(p)) {
-    const id = p.split('/')[3];
+  // 영상 하나 이상 + 이 스텝 → 한 구간짜리 후보 3개와, 필요하면 이어 붙이기 제안
+  if (m === 'POST' && p === '/api/videos/match') {
     const body = await readJson(req, 16 * 1024 * 1024);
+    const videoIds = (body.videoIds ?? []).filter((x) => typeof x === 'string');
+    if (!videoIds.length) return json(res, 400, { error: '영상이 없습니다.' });
     const job = startJob('video-match', async ({ progress, signal, dir }) => {
-      const { candidates, usage } = await matchClip({ videoId: id, doc: body.doc, path: body.path, jobDir: dir, onProgress: progress, signal });
-      return { candidates: await makePreviews({ videoId: id, candidates, signal, onProgress: progress }), usage };
+      const found = await matchClip({
+        videoIds, doc: body.doc, path: body.path, jobDir: dir, onProgress: progress, signal,
+      });
+      const withPreview = await makePreviews({
+        videoIds, singles: found.singles, sequence: found.sequence, workDir: dir, signal, onProgress: progress,
+      });
+      return { ...withPreview, usage: found.usage };
     });
     return json(res, 200, { jobId: job.id });
   }
-  if (m === 'POST' && /^\/api\/videos\/[^/]+\/clip$/.test(p)) {
-    const id = p.split('/')[3];
+  // 고른 구간(하나, 또는 이어 붙일 조각들) → GIF
+  if (m === 'POST' && p === '/api/videos/clip') {
     const body = await readJson(req);
-    const job = startJob('video-clip', ({ progress, signal }) => makeClipAsset({
-      videoId: id, start: Number(body.start), end: Number(body.end), label: body.label, signal, onProgress: progress,
+    const job = startJob('video-clip', ({ progress, signal, dir }) => makeClipAsset({
+      parts: body.parts ?? [], label: body.label, workDir: dir, signal, onProgress: progress,
     }));
     return json(res, 200, { jobId: job.id });
   }

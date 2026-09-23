@@ -49,55 +49,91 @@ export const DESCRIBE_SCHEMA = {
 };
 
 export function matchSystem() {
-  return `You pick which few seconds of a video best illustrate one step of a TikTok shooting guide.
+  return `You pick which seconds of the uploaded videos best illustrate one step of a TikTok shooting guide.
 The guide tells a creator what to film; the clip you pick becomes the reference GIF next to that step.
-You are given a second-by-second description of the video (and what is said, if anything), not the video itself.
+A step often describes several actions in order. When one continuous clip cannot show the whole step,
+you may take one short clip per action — from different videos if needed — to be played back to back.
+You are given a second-by-second description of each video (and what is said, if anything), not the videos themselves.
 Answer with JSON only — no commentary.`;
 }
 
-export function matchUser({ frames, speech, step, durationSec, minSec, maxSec, wantSec }) {
-  const desc = frames.map((f) => `${f.t}s ${f.desc}`).join('\n');
-  return `# The video, second by second (0–${Math.round(durationSec)}s)
-${desc}
+export function matchUser({ videos, step, minSec, maxSec, wantSec, partMinSec, partMaxSec, totalMaxSec }) {
+  const blocks = videos.map((v) => [
+    `## Video ${v.n}: ${v.name} (0–${Math.round(v.durationSec)}s)`,
+    v.frames.map((f) => `${f.t}s ${f.desc}`).join('\n'),
+    `말소리: ${speechBlock(v.speech)}`,
+  ].join('\n')).join('\n\n');
 
-# What is said
-${speechBlock(speech)}
+  return `# The uploaded video${videos.length > 1 ? 's' : ''}, second by second
+${blocks}
 
 # The step this clip is for
 ${step}
 
 # What to return
-Exactly 3 candidate clips, best first.
-- \`start\`·\`end\` in seconds (one decimal is fine), inside 0–${Math.round(durationSec)}.
+Two things — \`singles\` always, \`sequence\` when it helps.
+
+\`singles\`: 3 candidate clips that each stand on their own, best first.
+- \`video\` = which video it comes from (the number above). \`start\`·\`end\` in seconds, inside that video.
 - Length ${minSec}–${maxSec} seconds. Aim for about ${wantSec} seconds — that is how long the step runs.
-- The clip must **show the action this step describes**. Prefer the moment the action is clearly visible and steady,
-  and start a beat before it so the motion reads.
-- The three candidates must be different moments (at least 2 seconds apart), not three cuts of the same second.
-- \`why\`: one short **Korean** line saying what is in that clip and why it fits the step.
-- \`confidence\`: 0–1. Be honest — if nothing in the video shows this step, still return your three least-bad guesses with low confidence.`;
+- The three must be different moments (at least 2 seconds apart within the same video).
+- \`confidence\` 0–1: how well that one clip **alone** shows what the step asks for. Be honest and low when it only half fits.
+
+\`sequence\`: clips played back to back that together show the step from start to finish.
+- **Use it when no single clip covers the step** — the step lists several actions, or the right moments are scattered.
+  Stitching the right moments should score **higher confidence** than any single clip; that is the point of it.
+- \`parts\`: 2–4 clips **in the order the step lists them**, each ${partMinSec}–${partMaxSec} seconds, ${totalMaxSec} seconds in total at most.
+- Parts may come from different videos. Prefer one video when it already shows the whole thing in order.
+- Set \`sequence\` to null only when one single clip genuinely covers the step better than any stitch.
+
+Every \`why\` is one short **Korean** line: what is in that clip and why it fits. The sequence gets its own \`why\` too.`;
 }
+
+const CLIP_PROPS = {
+  video: { type: 'integer', minimum: 1 },
+  start: { type: 'number', minimum: 0 },
+  end: { type: 'number', minimum: 0 },
+  why: { type: 'string' },
+};
 
 export const MATCH_SCHEMA = {
   type: 'object',
   properties: {
-    candidates: {
+    singles: {
       type: 'array',
       minItems: 1,
       maxItems: 5,
       items: {
         type: 'object',
-        properties: {
-          start: { type: 'number', minimum: 0 },
-          end: { type: 'number', minimum: 0 },
-          why: { type: 'string' },
-          confidence: { type: 'number', minimum: 0, maximum: 1 },
-        },
-        required: ['start', 'end', 'why'],
+        properties: { ...CLIP_PROPS, confidence: { type: 'number', minimum: 0, maximum: 1 } },
+        required: ['video', 'start', 'end', 'why'],
         additionalProperties: false,
       },
     },
+    sequence: {
+      anyOf: [
+        { type: 'null' },
+        {
+          type: 'object',
+          properties: {
+            parts: {
+              type: 'array',
+              minItems: 2,
+              maxItems: 4,
+              items: {
+                type: 'object', properties: CLIP_PROPS, required: ['video', 'start', 'end', 'why'], additionalProperties: false,
+              },
+            },
+            why: { type: 'string' },
+            confidence: { type: 'number', minimum: 0, maximum: 1 },
+          },
+          required: ['parts', 'why'],
+          additionalProperties: false,
+        },
+      ],
+    },
   },
-  required: ['candidates'],
+  required: ['singles'],
   additionalProperties: false,
 };
 
