@@ -108,12 +108,17 @@ export function grayPng(width, height, shade = 0xe3) {
  * @param {string} o.parentPageId
  * @param {(p:{phase:string, done?:number, total?:number, detail?:string})=>void} [o.onProgress]
  */
-export async function publishDoc({ doc, client, readAsset, placeholders = {}, parentPageId, onProgress = () => {} }) {
+export async function publishDoc({
+  doc, client, readAsset, placeholders = {}, parentPageId, onProgress = () => {}, translate,
+}) {
   const title = String(doc.title ?? '').trim();
   if (!title) throw new Error('컨텐츠 브리프 이름(페이지 제목)이 비어 있습니다.');
 
   onProgress({ phase: 'check', detail: '노션 부모 페이지 확인' });
   await client.retrievePage(parentPageId);
+
+  // 미리보기는 한국어, 노션은 영어 — 올리기 직전에 영어본을 만든다.
+  const docEn = doc.lang === 'en' ? doc : await translate(doc);
 
   // 1. 사진
   const slots = imageSlots(doc);
@@ -133,7 +138,8 @@ export async function publishDoc({ doc, client, readAsset, placeholders = {}, pa
   }
   onProgress({ phase: 'images', done: slots.length, total: slots.length, detail: '사진을 모두 올렸습니다' });
 
-  const blocks = docToBlocks(doc, uploads);
+  // 사진 자리의 id 는 옮기기 전후가 같으므로 위에서 만든 업로드 목록을 그대로 쓴다.
+  const blocks = docToBlocks(docEn, uploads);
 
   // 2. 페이지
   onProgress({ phase: 'page', detail: '페이지 만드는 중' });
@@ -155,5 +161,9 @@ export async function publishDoc({ doc, client, readAsset, placeholders = {}, pa
     } catch { e.rolledBack = false; }
     throw e;
   }
-  return { pageId: page.id, url: page.url ?? `https://www.notion.so/${String(page.id).replace(/-/g, '')}` };
+  return {
+    pageId: page.id,
+    url: page.url ?? `https://www.notion.so/${String(page.id).replace(/-/g, '')}`,
+    docEn,
+  };
 }

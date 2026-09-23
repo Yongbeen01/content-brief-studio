@@ -8,6 +8,8 @@
  * `Step N`·`0:04–0:10` 이 저절로 맞고, Don'ts 가 늘어도 🔴 금지 표현 번호가 따라간다.
  */
 
+import { chromeText, nodeText } from './chrome.js';
+
 export function uid() {
   return Math.random().toString(36).slice(2, 10);
 }
@@ -109,11 +111,17 @@ export function stepTimeline(doc) {
   return { steps: out, total: t };
 }
 
-export const durationText = (tl) => `${fmtClock(tl.start)}–${fmtClock(tl.end)} (${tl.secs} secs)`;
+export const durationText = (tl, lang = 'ko') => chromeText('secs', lang, {
+  start: fmtClock(tl.start), end: fmtClock(tl.end), secs: tl.secs,
+});
 
-export function stepTitle(step, tl) {
+export function stepTitle(step, tl, lang = 'ko') {
   const star = step.star && !String(step.title).includes('⭐') ? ' ⭐' : '';
-  return `Step ${tl?.index ?? '?'}${step.hook ? ' (HOOK)' : ''}: ${step.title}${star}`;
+  return chromeText('stepPrefix', lang, {
+    n: tl?.index ?? '?',
+    hook: step.hook ? chromeText('stepHook', lang) : '',
+    title: `${step.title}${star}`,
+  });
 }
 
 /** 🔴 금지 표현 제목의 번호 — Don'ts 항목 수 + 1. */
@@ -129,7 +137,25 @@ export function wordTableNumber(doc) {
   return count + 1;
 }
 
-export const wordTableTitle = (doc) => `🔴 ${wordTableNumber(doc)}. DO NOT say the words below`;
+export const wordTableTitle = (doc, lang = 'ko') => chromeText('wordTableTitle', lang, { n: wordTableNumber(doc) });
+
+/**
+ * 표의 줄들 — 첫 칸이 고정 문구인 줄(가이드 한눈에 보기 표)은 그 언어의 항목 이름으로 바꿔 준다.
+ * `rowChrome[i]` 가 그 줄 첫 칸의 고정 문구 key 다.
+ */
+export function tableRows(node, lang = 'ko') {
+  return (node.rows ?? []).map((row, i) => {
+    const keys = node.rowChrome?.[i];
+    if (!keys) return row;
+    return row.map((cell, j) => (keys[j] ? chromeText(keys[j], lang) : cell));
+  });
+}
+
+/** Dos/Don'ts 항목의 글자 — 코드가 채운 표준 항목은 고정 문구에서 온다. */
+export function gridItemText(item, lang = 'ko') {
+  if (!item?.chrome) return { title: item?.title ?? '', desc: item?.desc ?? '' };
+  return { title: chromeText(item.chrome, lang), desc: chromeText(`${item.chrome}Desc`, lang) };
+}
 
 /** 그리드 항목을 두 개씩 줄로. */
 export function gridRows(grid) {
@@ -137,6 +163,9 @@ export function gridRows(grid) {
   for (let i = 0; i < (grid.items ?? []).length; i += 2) rows.push(grid.items.slice(i, i + 2).map((it, j) => ({ ...it, n: i + j + 1, index: i + j })));
   return rows;
 }
+
+/** 고정 문구 표시. 노드가 chrome 을 들고 있으면 그 언어의 글자, 아니면 사람이 고친 글자. */
+export { nodeText };
 
 /** 문서 안의 모든 사진 자리 [{ path, node, label }] — 게시 전 회색 자리 만들기·업로드용. */
 export function imageSlots(doc) {
@@ -164,15 +193,16 @@ export function imageSlots(doc) {
 // ── 마크다운 내보내기 ───────────────────────────────────────────────────────
 
 /** 노션에 붙여넣어도 모양이 대체로 살아나는 마크다운. 노션 게시가 안 될 때의 비상구다. */
-export function docToMarkdown(doc) {
+export function docToMarkdown(doc, lang = 'ko') {
   const tl = stepTimeline(doc);
+  const L = (key, vars) => chromeText(key, lang, vars);
   const lines = [`# ${doc.title ?? ''}`, ''];
   const img = (label) => `![${label}](이미지 자리)`;
   const emit = (n, quote = '') => {
     const q = (s) => String(s).split('\n').map((l) => `${quote}${l}`).join('\n');
     switch (n.type) {
-      case 'paragraph': lines.push(q(n.text), quote ? quote.trimEnd() : ''); break;
-      case 'heading': lines.push(q(`${'#'.repeat(n.level)} ${n.text}`), ''); break;
+      case 'paragraph': lines.push(q(nodeText(n, lang)), quote ? quote.trimEnd() : ''); break;
+      case 'heading': lines.push(q(`${'#'.repeat(n.level)} ${nodeText(n, lang)}`), ''); break;
       case 'bulleted': lines.push(...n.items.map((t) => q(`- ${t}`)), ''); break;
       case 'numbered': lines.push(...n.items.map((t, i) => q(`${i + 1}. ${t}`)), ''); break;
       case 'divider': lines.push('---', ''); break;
@@ -183,7 +213,8 @@ export function docToMarkdown(doc) {
         lines.push('');
         break;
       case 'table': {
-        const [head, ...rest] = n.rows;
+        const rows = tableRows(n, lang);
+        const [head, ...rest] = rows;
         const cell = (s) => String(s).replace(/\n/g, '<br>').replace(/\|/g, '\\|');
         lines.push(q(`| ${head.map(cell).join(' | ')} |`), q(`| ${head.map(() => '---').join(' | ')} |`));
         for (const r of rest) lines.push(q(`| ${r.map(cell).join(' | ')} |`));
@@ -192,12 +223,12 @@ export function docToMarkdown(doc) {
       }
       case 'step': {
         const t = tl.steps.get(n.id);
-        lines.push(`### **${stepTitle(n, t)}**`, '', img(`Step ${t?.index} 참고 GIF`), '');
-        lines.push('#### ⏱ Time Duration', durationText(t), '');
-        lines.push('#### 🩷 Action', ...n.action.map((a) => `- ${a}`), '');
-        lines.push('#### 👁 Visual', ...n.visual.map((a) => `- ${a}`), '');
-        lines.push('#### 🔤 Subtitle', ...n.subtitle, '');
-        if (n.narration?.length) lines.push('#### 💬 Narration', ...n.narration, '');
+        lines.push(`### **${stepTitle(n, t, lang)}**`, '', img(`Step ${t?.index} 참고 GIF`), '');
+        lines.push(`#### ${L('stepDuration')}`, durationText(t, lang), '');
+        lines.push(`#### ${L('stepAction')}`, ...n.action.map((a) => `- ${a}`), '');
+        lines.push(`#### ${L('stepVisual')}`, ...n.visual.map((a) => `- ${a}`), '');
+        lines.push(`#### ${L('stepSubtitle')}`, ...n.subtitle, '');
+        if (n.narration?.length) lines.push(`#### ${L('stepNarration')}`, ...n.narration, '');
         lines.push('---', '');
         break;
       }
@@ -208,7 +239,8 @@ export function docToMarkdown(doc) {
         });
         break;
       case 'wordTable':
-        lines.push(`### ${wordTableTitle(doc)}`, n.note, '', '| ❌ Don’t say | ✅ Say instead |', '| --- | --- |');
+        lines.push(`### ${wordTableTitle(doc, lang)}`, n.note, '',
+          `| ${L('wordTableDont')} | ${L('wordTableInstead')} |`, '| --- | --- |');
         for (const r of n.rows) lines.push(`| ${r.dont} | ${r.instead} |`);
         lines.push('');
         break;

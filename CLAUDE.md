@@ -41,6 +41,9 @@ OAuth 연결 자체를 확인할 때만 설치본을 멈추고 4325 로 띄운�
 ## 구조
 
 - `docs/brief-template-guide.md` — 템플릿 구성·톤앤매너 지침. **프롬프트가 이 파일을 그대로 읽는다.**
+- **언어**: 초안·미리보기는 한국어, 노션에 올릴 때 영어. 고정 문구(섹션 제목·소제목·표 항목 이름·표준 Don't)는
+  `web/js/chrome.js` 가 두 벌로 들고 있어 옮기기를 거치지 않는다. 내용만 `src/brief/translate.js` 가 자리별로
+  뽑아 Claude 에게 보내고 같은 순서로 받아 되꽂는다. 해시태그·계정 태그는 그대로 둔다(`AS_IS_ROWS`).
 - `src/claude/` — Claude CLI 호출(구독 로그인, stream-json, --json-schema), JSON 추출.
 - `src/sources/` — 사측 공유 파일 읽기(docx·pptx·xlsx 는 의존성 없는 ZIP/XML 파서, PDF 는 Claude 가 직접 읽음, 노션 링크).
 - `src/brief/` — 작성·보정·문서 트리·편집/추가.

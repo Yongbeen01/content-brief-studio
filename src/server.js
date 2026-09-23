@@ -11,6 +11,8 @@ import * as store from './store.js';
 import { startJob, getJob, jobView, cancelJob } from './jobs.js';
 import { generateBrief, findPartnershipPage } from './brief/generate.js';
 import { runEdit, runInsert } from './brief/edit.js';
+import { translateDoc } from './brief/translate.js';
+import { docToMarkdown } from '../web/js/doc.js';
 import { publishDoc } from './notion/publish.js';
 import { notionClient } from './notion/index.js';
 import * as oauth from './notion/oauth.js';
@@ -239,16 +241,25 @@ async function handleApi(req, res, url) {
     });
     return json(res, 200, { jobId: job.id });
   }
+  if (m === 'POST' && p === '/api/translate') {
+    const body = await readJson(req, 16 * 1024 * 1024);
+    const job = startJob('translate', ({ progress, signal, dir }) => translateDoc({
+      doc: body.doc, docMarkdown: docToMarkdown(body.doc, 'ko'), jobDir: dir, onProgress: progress, signal,
+    }).then((docEn) => ({ docEn })));
+    return json(res, 200, { jobId: job.id });
+  }
   if (m === 'POST' && p === '/api/publish') {
     const body = await readJson(req, 16 * 1024 * 1024);
     if (!oauth.status().connected) return json(res, 400, { error: '노션이 연결되어 있지 않습니다.' });
-    const job = startJob('publish', ({ progress }) => publishDoc({
+    const job = startJob('publish', ({ progress, signal, dir }) => publishDoc({
       doc: body.doc,
       client: notionClient(),
       readAsset: store.readAsset,
       placeholders: body.placeholders ?? {},
       parentPageId: config.notion.parentPageId,
       onProgress: progress,
+      // 한국어 초안이면 올리기 직전에 영어로 옮긴다. 화면이 이미 옮겨 둔 영어본을 보냈으면 그대로 쓴다.
+      translate: (doc) => translateDoc({ doc, docMarkdown: docToMarkdown(doc, 'ko'), jobDir: dir, onProgress: progress, signal }),
     }));
     return json(res, 200, { jobId: job.id });
   }

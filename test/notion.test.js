@@ -116,7 +116,23 @@ test('게시: 모든 요청이 중첩 2단·100개 이하, 순서 유지, 사진
   const fake = fakeNotion();
   const c = client(fake);
   const assetData = { data: Buffer.from('png'), mime: 'image/png', name: 'a.png' };
-  const res = await publishDoc({ doc, client: c, readAsset: () => assetData, parentPageId: PARENT });
+  const translated = [];
+  const res = await publishDoc({
+    doc,
+    client: c,
+    readAsset: () => assetData,
+    parentPageId: PARENT,
+    // 한국어 초안이면 올리기 직전에 영어로 옮긴다
+    translate: async (d) => {
+      translated.push(d);
+      const en = JSON.parse(JSON.stringify(d));
+      en.lang = 'en';
+      en.nodes.filter((n) => n.type === 'step').forEach((n) => { n.title = `EN ${n.title}`; });
+      return en;
+    },
+  });
+  assert.equal(translated.length, 1);
+  assert.equal(res.docEn.lang, 'en');
   assert.match(res.url, /notion\.so/);
   const appends = fake.log.filter((e) => e.path.endsWith('/children'));
   assert.ok(appends.length >= 3);
@@ -132,11 +148,25 @@ test('게시: 모든 요청이 중첩 2단·100개 이하, 순서 유지, 사진
   assert.equal(top[top.length - 1], 'callout');
 });
 
+test('게시: 이미 영어본이면 다시 옮기지 않는다', async () => {
+  const { doc } = buildDoc(sample, inputs, {});
+  const fake = fakeNotion();
+  let called = 0;
+  await publishDoc({
+    doc: { ...doc, lang: 'en' },
+    client: client(fake),
+    readAsset: () => ({ data: Buffer.from('png'), mime: 'image/png', name: 'a.png' }),
+    parentPageId: PARENT,
+    translate: async (d) => { called += 1; return d; },
+  });
+  assert.equal(called, 0);
+});
+
 test('게시: 중간 실패면 만든 페이지를 보관한다', async () => {
   const { doc } = buildDoc(sample, inputs, {});
   const fake = fakeNotion({ failAppendAt: 2 });
   await assert.rejects(
-    publishDoc({ doc, client: client(fake), readAsset: () => null, parentPageId: PARENT }),
+    publishDoc({ doc: { ...doc, lang: 'en' }, client: client(fake), readAsset: () => null, parentPageId: PARENT }),
     (e) => e.rolledBack === true,
   );
   assert.ok(fake.log.some((e) => e.method === 'PATCH' && e.archived === true));

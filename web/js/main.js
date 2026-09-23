@@ -29,7 +29,22 @@ const state = {
   claude: {},
   notion: {},
   generateJob: null,
+  /** 'ko' = 고치는 초안, 'en' = 노션에 올라갈 영어본(읽기 전용) */
+  lang: 'ko',
 };
+
+/** 영어본이 지금 한국어 초안에서 나온 것인지 보는 값. 초안이 바뀌면 영어본은 버린다. */
+function docStamp(doc) {
+  const s = JSON.stringify(doc ?? null);
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i += 1) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return `${s.length}:${(h >>> 0).toString(36)}`;
+}
+
+const enFresh = () => !!state.draft?.docEn && state.draft.docEnFrom === docStamp(currentDoc());
 
 // ── 작은 도구 ───────────────────────────────────────────────────────────────
 
@@ -268,11 +283,20 @@ function renderPublished() {
 
 function renderPreview() {
   const doc = currentDoc();
+  if (state.lang === 'en' && !enFresh()) state.lang = 'ko'; // 초안이 바뀌면 한국어로 돌아간다
+  const showEn = state.lang === 'en';
+  const shown = showEn ? state.draft.docEn : doc;
   $('empty_preview').classList.toggle('hidden', !!doc);
   $('doc').classList.toggle('hidden', !doc);
   $('preview_bar').classList.toggle('hidden', !doc);
-  if (doc) renderDoc($('doc'), doc, { editable: !state.busy || editor?.isRunning() });
-  $('undo_btn').disabled = !state.undo.length || state.busy;
+  if (doc) renderDoc($('doc'), shown, { editable: !showEn && (!state.busy || editor?.isRunning()), lang: showEn ? 'en' : 'ko' });
+  $('preview_hint').textContent = showEn
+    ? '영어 미리보기 · 노션에 올라갈 모양 (읽기 전용)'
+    : '누르면 고치기 · 사이를 누르면 추가';
+  $('preview_hint').classList.toggle('ok', showEn);
+  $('lang_btn').textContent = showEn ? '한국어로 돌아가기' : '영어로 보기';
+  $('lang_btn').disabled = !doc || state.busy;
+  $('undo_btn').disabled = !state.undo.length || state.busy || showEn;
   $('publish_btn').disabled = !doc || state.busy;
   $('source_notes').classList.toggle('hidden', !state.draft.sourceNotes);
   $('source_notes_body').textContent = state.draft.sourceNotes ?? '';
@@ -286,6 +310,10 @@ function commitDoc(next, { flashPath } = {}) {
     if (state.undo.length > 50) state.undo.shift();
   }
   state.draft.doc = next;
+  // 초안이 바뀌면 먼저 만들어 둔 영어본은 낡은 것이다.
+  state.draft.docEn = null;
+  state.draft.docEnFrom = '';
+  state.lang = 'ko';
   renderPreview();
   scheduleSave();
   if (flashPath) editor?.flash(flashPath);
@@ -403,6 +431,51 @@ async function generate() {
     $('generate_btn').querySelector('.btn-text').textContent = '생성';
     setBusy(false);
     renderPreview();
+  }
+}
+
+// ── 영어본 ──────────────────────────────────────────────────────────────────
+
+/** 지금 초안의 영어본. 없거나 낡았으면 Claude 로 옮긴다. */
+async function ensureEnglish() {
+  if (enFresh()) return state.draft.docEn;
+  const doc = currentDoc();
+  const stamp = docStamp(doc);
+  setBusy(true);
+  const hint = $('preview_hint');
+  const started = Date.now();
+  hint.textContent = '영어로 옮기는 중…';
+  hint.classList.add('warn');
+  try {
+    const { jobId } = await api('POST', '/api/translate', { doc });
+    const job = await pollJob(jobId, (j) => {
+      hint.textContent = `${j.detail || '영어로 옮기는 중'} · ${Math.round((Date.now() - started) / 1000)}초`;
+    });
+    if (job.status !== 'done') throw new Error(job.error?.message ?? '영어로 옮기지 못했습니다');
+    state.draft.docEn = job.result.docEn;
+    state.draft.docEnFrom = stamp;
+    scheduleSave();
+    return state.draft.docEn;
+  } finally {
+    hint.classList.remove('warn');
+    setBusy(false);
+  }
+}
+
+async function toggleLang() {
+  if (state.busy) return;
+  if (state.lang === 'en') {
+    state.lang = 'ko';
+    renderPreview();
+    return;
+  }
+  try {
+    await ensureEnglish();
+    state.lang = 'en';
+    renderPreview();
+    toast('노션에 올라갈 영어본입니다 — 고치려면 한국어로 돌아가세요');
+  } catch (e) {
+    toast(e.message, true);
   }
 }
 
@@ -594,6 +667,7 @@ function openPublish() {
   };
   add('만들 위치', state.notion.parentPageId === DEFAULT_PARENT ? 'Contents Guidline 아래 새 페이지' : `테스트 부모 ${state.notion.parentPageId} 아래 새 페이지`);
   add('페이지 제목', doc.title || '(비어 있음)');
+  add('언어', enFresh() ? '영어본 준비됨 (영어로 보기로 확인 가능)' : '올리기 직전에 영어로 옮깁니다');
   add('사진', `${filled}곳 넣음 · ${slots.length - filled}곳 회색 이미지`);
   const warns = lintDoc(doc, { plain: inline.plain }).filter((w) => w.level === 'warn');
   const extra = [];
@@ -636,16 +710,22 @@ async function doPublish() {
       placeholders[s.node.id] = asset.id;
       bar.style.width = `${Math.round((i / Math.max(1, empty.length)) * 15)}%`;
     }
-    const { jobId } = await api('POST', '/api/publish', { doc, placeholders });
+    // 영어본이 준비돼 있으면 그대로 올리고, 아니면 서버가 올리기 직전에 옮긴다.
+    const send = enFresh() ? state.draft.docEn : doc;
+    const { jobId } = await api('POST', '/api/publish', { doc: send, placeholders });
     const job = await pollJob(jobId, (j) => {
       setStatus('publish_status', j.detail || '노션에 올리는 중', 'busy');
-      const base = { check: 15, images: 15, page: 55, blocks: 60 }[j.phase] ?? 15;
-      const span = { images: 40, blocks: 40 }[j.phase] ?? 0;
+      const base = { check: 15, translate: 18, images: 50, page: 80, blocks: 82 }[j.phase] ?? 15;
+      const span = { translate: 32, images: 30, blocks: 18 }[j.phase] ?? 0;
       bar.style.width = `${Math.min(100, base + (j.total ? (span * j.done) / j.total : 0))}%`;
     });
     if (job.status === 'done') {
       bar.style.width = '100%';
-      const { url } = job.result;
+      const { url, docEn } = job.result;
+      if (docEn) {
+        state.draft.docEn = docEn;
+        state.draft.docEnFrom = docStamp(doc);
+      }
       state.draft.published = [...(state.draft.published ?? []), { url, at: Date.now(), title: doc.title }];
       scheduleSave();
       renderPublished();
@@ -728,8 +808,13 @@ function wire() {
   form.addEventListener('drop', (e) => { e.preventDefault(); if (e.dataTransfer?.files?.length) addFiles([...e.dataTransfer.files]); });
 
   $('undo_btn').addEventListener('click', undo);
+  $('lang_btn').addEventListener('click', toggleLang);
   $('copy_md_btn').addEventListener('click', async () => {
-    try { await navigator.clipboard.writeText(docToMarkdown(currentDoc())); toast('마크다운을 복사했습니다'); } catch { toast('복사하지 못했습니다', true); }
+    const showEn = state.lang === 'en' && enFresh();
+    try {
+      await navigator.clipboard.writeText(docToMarkdown(showEn ? state.draft.docEn : currentDoc(), showEn ? 'en' : 'ko'));
+      toast(showEn ? '영어본 마크다운을 복사했습니다' : '마크다운을 복사했습니다');
+    } catch { toast('복사하지 못했습니다', true); }
   });
   $('new_btn').addEventListener('click', startNew);
   $('publish_btn').addEventListener('click', openPublish);

@@ -1,6 +1,7 @@
 import {
-  durationText, gridRows, stepTimeline, stepTitle, wordTableTitle,
+  durationText, gridItemText, gridRows, nodeText, stepTimeline, stepTitle, tableRows, wordTableTitle,
 } from './doc.js';
+import { chromeText } from './chrome.js';
 
 /**
  * 문서 트리 → 노션처럼 보이는 DOM.
@@ -76,17 +77,18 @@ function list(tag, items, path) {
 }
 
 function renderNode(doc, n, path, ctx) {
+  const lang = ctx.lang;
   switch (n.type) {
     case 'paragraph':
-      return el('div', { class: `n-block n-p ${n.color && n.color !== 'default' ? `c-${n.color}` : ''}`, dataset: { path: P(path) } }, rich(n.text));
+      return el('div', { class: `n-block n-p ${n.color && n.color !== 'default' ? `c-${n.color}` : ''}`, dataset: { path: P(path) } }, rich(nodeText(n, lang)));
     case 'heading':
-      return el('div', { class: `n-block n-h n-h${n.level}`, dataset: { path: P(path) } }, rich(n.text));
+      return el('div', { class: `n-block n-h n-h${n.level}`, dataset: { path: P(path) } }, rich(nodeText(n, lang)));
     case 'bulleted': return list('ul', n.items, path);
     case 'numbered': return list('ol', n.items, path);
     case 'divider': return el('hr', { class: 'n-block n-divider', dataset: { path: P(path) } });
     case 'image': return el('div', { class: 'n-block' }, slot({ ...n, displayLabel: n.slot === 'product' ? '제품 이미지' : n.label }, path, n.slot === 'product' ? 'product' : ''));
     case 'table': {
-      const rows = n.rows.map((r, i) => el('tr', {
+      const rows = tableRows(n, lang).map((r, i) => el('tr', {
         class: n.header && i === 0 ? 'is-head' : '',
         dataset: { path: P(n.header && i === 0 ? path : [...path, 'rows', i]) },
       }, r.map((c) => el('td', {}, rich(c)))));
@@ -107,20 +109,20 @@ function renderNode(doc, n, path, ctx) {
     }
     case 'step': {
       const t = ctx.tl.steps.get(n.id);
-      const sub = (field, title, content, empty = '') => el('div', { class: 'n-sub', dataset: { path: P([...path, field]) } },
-        el('div', { class: 'n-h n-h3' }, title),
+      const sub = (field, key, content, empty = '') => el('div', { class: 'n-sub', dataset: { path: P([...path, field]) } },
+        el('div', { class: 'n-h n-h3' }, chromeText(key, lang)),
         content ?? el('div', { class: 'n-p n-empty' }, empty));
       const lines = (arr) => (arr?.length ? el('div', {}, arr.map((s) => el('div', { class: 'n-p' }, rich(s)))) : null);
       return el('div', { class: 'n-block n-step' },
-        el('div', { class: 'n-h n-h3', dataset: { path: P(path) }, title: '스텝 전체 고치기' }, el('strong', {}, rich(stepTitle(n, t)))),
+        el('div', { class: 'n-h n-h3', dataset: { path: P(path) }, title: '스텝 전체 고치기' }, el('strong', {}, rich(stepTitle(n, t, lang)))),
         el('div', { class: 'n-cols' },
           el('div', { class: 'n-col' }, slot({ ...n.image, displayLabel: `Step ${t?.index ?? ''} 참고 GIF` }, [...path, 'image'])),
           el('div', { class: 'n-col' },
-            sub('seconds', '⏱ Time Duration', el('div', { class: 'n-p' }, t ? durationText(t) : '')),
-            sub('action', '🩷 Action', n.action?.length ? el('ul', { class: 'n-ul' }, n.action.map((s) => el('li', {}, rich(s)))) : null, '(비어 있음)'),
-            sub('visual', '👁 Visual', n.visual?.length ? el('ul', { class: 'n-ul' }, n.visual.map((s) => el('li', {}, rich(s)))) : null, '(비어 있음)'),
-            sub('subtitle', '🔤 Subtitle', lines(n.subtitle), '(비어 있음)'),
-            sub('narration', '💬 Narration', lines(n.narration), '(없음 — 눌러서 추가)'))),
+            sub('seconds', 'stepDuration', el('div', { class: 'n-p' }, t ? durationText(t, lang) : '')),
+            sub('action', 'stepAction', n.action?.length ? el('ul', { class: 'n-ul' }, n.action.map((s) => el('li', {}, rich(s)))) : null, '(비어 있음)'),
+            sub('visual', 'stepVisual', n.visual?.length ? el('ul', { class: 'n-ul' }, n.visual.map((s) => el('li', {}, rich(s)))) : null, '(비어 있음)'),
+            sub('subtitle', 'stepSubtitle', lines(n.subtitle), '(비어 있음)'),
+            sub('narration', 'stepNarration', lines(n.narration), '(없음 — 눌러서 추가)'))),
         el('hr', { class: 'n-divider' }));
     }
     case 'grid': {
@@ -128,9 +130,12 @@ function renderNode(doc, n, path, ctx) {
       const iPath = [...path, 'items'];
       gridRows(n).forEach((row, r) => {
         if (ctx.editable) wrap.append(gap(iPath, r * 2));
-        wrap.append(el('div', { class: 'n-cols' }, row.map((it) => el('div', { class: 'n-col', dataset: { path: P([...iPath, it.index]) } },
-          el('div', { class: 'n-h n-h3' }, rich(`${it.n}. ${it.title}`)),
-          el('div', { class: 'n-p' }, rich(it.desc)))),
+        wrap.append(el('div', { class: 'n-cols' }, row.map((it) => {
+          const { title, desc } = gridItemText(it, lang);
+          return el('div', { class: 'n-col', dataset: { path: P([...iPath, it.index]) } },
+            el('div', { class: 'n-h n-h3' }, rich(`${it.n}. ${title}`)),
+            el('div', { class: 'n-p' }, rich(desc)));
+        }),
         row.length === 1 ? el('div', { class: 'n-col' }) : null));
         const im = n.images?.[r];
         if (im) {
@@ -144,18 +149,18 @@ function renderNode(doc, n, path, ctx) {
     }
     case 'wordTable':
       return el('div', { class: 'n-block', dataset: { path: P(path) } },
-        el('div', { class: 'n-h n-h3' }, wordTableTitle(doc)),
+        el('div', { class: 'n-h n-h3' }, wordTableTitle(doc, lang)),
         n.note ? el('div', { class: 'n-p' }, rich(n.note)) : null,
         el('div', { class: 'n-table-wrap' }, el('table', { class: 'n-table' }, el('tbody', {},
-          el('tr', { class: 'is-head' }, el('td', {}, '❌ Don’t say'), el('td', {}, '✅ Say instead')),
+          el('tr', { class: 'is-head' }, el('td', {}, chromeText('wordTableDont', lang)), el('td', {}, chromeText('wordTableInstead', lang))),
           n.rows.map((r) => el('tr', {}, el('td', {}, rich(r.dont)), el('td', {}, rich(r.instead))))))));
     default:
       return el('div', { class: 'n-block n-p n-empty' }, `(${n.type})`);
   }
 }
 
-export function renderDoc(root, doc, { editable = true } = {}) {
-  const ctx = { editable, tl: stepTimeline(doc) };
+export function renderDoc(root, doc, { editable = true, lang = 'ko' } = {}) {
+  const ctx = { editable, lang, tl: stepTimeline(doc) };
   root.replaceChildren();
   root.classList.toggle('is-editable', editable);
   root.append(el('div', { class: `n-title ${doc.title ? '' : 'is-empty'}` }, doc.title || '(브리프 이름 없음)'));

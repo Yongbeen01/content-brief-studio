@@ -1,4 +1,4 @@
-import { imageSlots, stepTimeline } from './doc.js';
+import { gridItemText, imageSlots, stepTimeline } from './doc.js';
 
 /**
  * 문서가 지침(docs/brief-template-guide.md)의 "반드시" 항목을 지키는지 본다.
@@ -7,11 +7,12 @@ import { imageSlots, stepTimeline } from './doc.js';
  * @returns {{ level: 'warn'|'info', text: string }[]}
  */
 
+// 초안은 한국어, 노션에 올라간 뒤는 영어라 두 언어를 다 본다.
 export const REQUIRED_DONTS = [
-  { key: 'other-brands', re: /other\s+(brand|product|skincare|patch)|competitor|different brand/i, label: '타사 제품 금지' },
-  { key: 'pr-haul', re: /haul|unbox/i, label: 'PR Haul 금지' },
-  { key: 'horizontal', re: /horizontal|landscape|sideways/i, label: '가로 영상 금지' },
-  { key: 'filter', re: /filter/i, label: '필터 금지' },
+  { key: 'other-brands', re: /other\s+(brand|product|skincare|patch)|competitor|different brand|타사|타 브랜드|다른 브랜드|경쟁/i, label: '타사 제품 금지' },
+  { key: 'pr-haul', re: /haul|unbox|하울|언박싱|개봉/i, label: 'PR Haul 금지' },
+  { key: 'horizontal', re: /horizontal|landscape|sideways|가로/i, label: '가로 영상 금지' },
+  { key: 'filter', re: /filter|필터/i, label: '필터 금지' },
 ];
 
 export const brandSlug = (brand) => String(brand ?? '').toLowerCase().replace(/[^a-z0-9_]/g, '');
@@ -43,8 +44,8 @@ function overviewRow(doc, name) {
 /** "40 seconds to 1 minute" · "35–45 seconds" · "30 secs" → [min, max] 초. 못 읽으면 null. */
 export function parseLengthRange(text) {
   const s = String(text ?? '').toLowerCase();
-  const UNIT = '(seconds?|secs?|minutes?|mins?)';
-  const mult = (u) => (/^min/.test(u) ? 60 : 1);
+  const UNIT = '(seconds?|secs?|minutes?|mins?|초|분)';
+  const mult = (u) => (/^min|^분/.test(u) ? 60 : 1);
   const vals = [];
   // 단위가 붙은 숫자만 길이로 본다 — 해상도(1080x1920)·비율(9:16) 숫자는 빠진다.
   const rest = s.replace(new RegExp(`(\\d+(?:\\.\\d+)?)\\s*(?:-|–|~|to)\\s*(\\d+(?:\\.\\d+)?)\\s*${UNIT}`, 'g'), (m, a, b, u) => {
@@ -62,7 +63,10 @@ export function lintDoc(doc, { plain = (t) => String(t ?? '') } = {}) {
   const info = (text) => out.push({ level: 'info', text });
 
   const dontGrid = findAll(doc.nodes, (n) => n.type === 'grid' && n.kind === 'dont')[0];
-  const dontText = (dontGrid?.items ?? []).map((it) => plain(`${it.title} ${it.desc}`)).join('\n');
+  const dontText = (dontGrid?.items ?? []).map((it) => {
+    const t = gridItemText(it, doc.lang === 'en' ? 'en' : 'ko');
+    return plain(`${t.title} ${t.desc}`);
+  }).join('\n');
   const missing = REQUIRED_DONTS.filter((r) => !r.re.test(dontText)).map((r) => r.label);
   if (missing.length) warn(`Don'ts 에 필수 항목이 빠졌습니다: ${missing.join(', ')}`);
 

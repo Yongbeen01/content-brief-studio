@@ -1,7 +1,11 @@
 import { inline } from '../brief/inline.js';
 import {
-  durationText, gridRows, stepTimeline, stepTitle, wordTableTitle,
+  durationText, gridItemText, gridRows, nodeText, stepTimeline, stepTitle, tableRows, wordTableTitle,
 } from '../../web/js/doc.js';
+import { chromeText } from '../../web/js/chrome.js';
+
+/** 노션에 올라가는 문서는 늘 영어다 — 고정 문구는 영어 쪽을 쓰고, 내용은 옮기기 단계가 이미 영어로 바꿔 둔다. */
+const LANG = 'en';
 
 /**
  * 문서 트리 → 노션 블록(JSON). 자식은 깊이 제한 없이 끝까지 넣는다 — 한 요청에 담을 수 있는 만큼
@@ -65,15 +69,16 @@ function table(rows, header) {
 
 function stepBlocks(doc, n, uploads, tl) {
   const t = tl.steps.get(n.id);
+  const L = (key) => chromeText(key, LANG);
   const right = [
-    head(3, '⏱ Time Duration'), para(durationText(t)),
-    head(3, '🩷 Action'), ...bullets(n.action),
-    head(3, '👁 Visual'), ...bullets(n.visual),
-    head(3, '🔤 Subtitle'), ...n.subtitle.map((s) => para(s)),
+    head(3, L('stepDuration')), para(durationText(t, LANG)),
+    head(3, L('stepAction')), ...bullets(n.action),
+    head(3, L('stepVisual')), ...bullets(n.visual),
+    head(3, L('stepSubtitle')), ...n.subtitle.map((s) => para(s)),
   ];
-  if (n.narration?.length) right.push(head(3, '💬 Narration'), ...n.narration.map((s) => para(s)));
+  if (n.narration?.length) right.push(head(3, L('stepNarration')), ...n.narration.map((s) => para(s)));
   return [
-    head(3, `**${stepTitle(n, t)}**`),
+    head(3, `**${stepTitle(n, t, LANG)}**`),
     columns([image(n.image, uploads)], right),
     divider(),
   ];
@@ -82,7 +87,10 @@ function stepBlocks(doc, n, uploads, tl) {
 function gridBlocks(n, uploads) {
   const out = [];
   gridRows(n).forEach((row, r) => {
-    out.push(columns(...row.map((it) => [head(3, `${it.n}. ${it.title}`), para(it.desc)]), ...(row.length === 1 ? [[]] : [])));
+    out.push(columns(...row.map((it) => {
+      const { title, desc } = gridItemText(it, LANG);
+      return [head(3, `${it.n}. ${title}`), para(desc)];
+    }), ...(row.length === 1 ? [[]] : [])));
     if (n.images?.[r]) out.push(image(n.images[r], uploads));
   });
   return out;
@@ -90,20 +98,21 @@ function gridBlocks(n, uploads) {
 
 function nodeBlocks(doc, n, uploads, tl) {
   switch (n.type) {
-    case 'paragraph': return [para(n.text, n.color)];
-    case 'heading': return [head(n.level, n.text)];
+    case 'paragraph': return [para(nodeText(n, LANG), n.color)];
+    case 'heading': return [head(n.level, nodeText(n, LANG))];
     case 'bulleted': return bullets(n.items);
     case 'numbered': return numbers(n.items);
     case 'divider': return [divider()];
     case 'image': return [image(n, uploads)];
-    case 'table': return [table(n.rows, n.header)];
+    case 'table': return [table(tableRows(n, LANG), n.header)];
     case 'step': return stepBlocks(doc, n, uploads, tl);
     case 'grid': return gridBlocks(n, uploads);
     case 'wordTable':
       return [
-        head(3, wordTableTitle(doc)),
+        head(3, wordTableTitle(doc, LANG)),
         ...(n.note ? [para(n.note)] : []),
-        table([['❌ Don’t say', '✅ Say instead'], ...n.rows.map((r) => [r.dont, r.instead])], true),
+        table([[chromeText('wordTableDont', LANG), chromeText('wordTableInstead', LANG)],
+          ...n.rows.map((r) => [r.dont, r.instead])], true),
       ];
     case 'callout': {
       const body = { rich_text: [], color: apiColor(n.color), children: n.children.flatMap((c) => nodeBlocks(doc, c, uploads, tl)) };

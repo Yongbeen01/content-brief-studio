@@ -146,6 +146,9 @@ export const EDIT = {
   wordTable: obj({ note: str, rows: { type: 'array', items: WORD_ROW, minItems: 1 } }),
 };
 
+/** 한국어 초안 → 영어본. 보낸 줄 수와 같은 수의 글자가 같은 순서로 와야 한다. */
+export const TRANSLATE = obj({ texts: { type: 'array', items: str, minItems: 1 } });
+
 /** 추가 자리 종류 → 돌려받을 모양. */
 export const INSERT = {
   top: obj({ nodes: { type: 'array', items: TOP_NODE, minItems: 1, maxItems: 6 } }),

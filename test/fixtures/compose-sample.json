@@ -2,81 +2,81 @@
   "brandName": "LUMIA",
   "productName": "LUMIA Glow Drop Serum",
   "whatIsIt": [
-    "The **LUMIA Glow Drop Serum** is a Korean hydrating serum for dull, tired-looking skin, in a 30ml dropper bottle.",
-    "A water-light gel texture that sinks in fast instead of sitting on top of your skin.",
-    "Niacinamide: helps the look of uneven tone",
-    "Hyaluronic Acid: helps skin feel plump and hydrated"
+    "**LUMIA Glow Drop Serum**은 칙칙해 보이는 피부를 위한 30ml 스포이드형 한국 수분 세럼입니다.",
+    "물처럼 가벼운 젤 제형이라 피부 위에 겉돌지 않고 빠르게 스며듭니다.",
+    "나이아신아마이드: 고르지 않아 보이는 톤을 정돈하는 데 도움",
+    "히알루론산: 피부가 촉촉하고 탄탄해 보이도록 도움"
   ],
   "howToUse": [
-    "1. Apply 2–3 drops to clean skin.",
-    "Gently pat until fully absorbed.",
-    "Use morning and night before moisturizer."
+    "1. 세안 후 2~3방울을 덜어 냅니다.",
+    "완전히 스며들 때까지 가볍게 두드립니다.",
+    "아침저녁으로 크림 전에 씁니다."
   ],
   "mainIdea": [
-    "A close-up, texture-driven TikTok showcasing LUMIA's water-light glow serum.",
-    "It walks through the dropper, the texture on skin and the instant glow."
+    "LUMIA의 물 같은 광채 세럼을 클로즈업과 텍스처로 보여 주는 영상입니다.",
+    "스포이드 → 텍스처 → 흡수 → 광채 순서로 이어집니다."
   ],
   "hashtags": ["#glowserum", "#kbeauty", "#skintok", "#glassskin"],
-  "caption": "wait why does my skin look like this 😳\nthis water-light serum sinks in instantly\ngrab it on tiktok shop 💧",
+  "caption": "내 피부 왜 이렇게 됐지 😳\n물처럼 가벼운 세럼이 순식간에 스며들어요\n틱톡샵에서 바로 담아 가세요 💧",
   "pronunciation": "**LOO-mee-ah**",
-  "music": "Anything bright and upbeat.\nAvoid trending audio with harsh edits.",
-  "videoType": "Vertical, 9:16, 1080x1920 or higher. 20–30 seconds. Bright lighting.",
+  "music": "밝고 잔잔한 음악이면 됩니다.\n비트가 크게 터지는 음원은 피해 주세요.",
+  "videoType": "세로 9:16, 1080x1920 이상. 20~30초. 밝은 조명.",
   "steps": [
     {
-      "title": "Step 1 (HOOK): The Dropper Drip",
+      "title": "Step 1 (HOOK): 스포이드 한 방울",
       "hook": true, "star": false, "seconds": 4,
-      "action": ["Start **mid-action**, squeezing the dropper over your cheek.", "No intro."],
-      "visual": ["Extreme close-up of the drop.", "Use this moment as the **thumbnail**."],
-      "subtitle": ["one drop = glass skin?"],
-      "narration": ["“Okay… watch this.”"],
+      "action": ["설명 없이 **한 방울 떨어뜨리는 장면**부터 시작하세요.", "인트로는 넣지 마세요."],
+      "visual": ["한 방울을 익스트림 클로즈업으로 잡으세요.", "이 컷을 **썸네일**로 씁니다."],
+      "subtitle": ["한 방울로 유리 피부?"],
+      "narration": ["“자, 이거 봐요.”"],
       "gifHint": "스포이드에서 한 방울 떨어지는 클로즈업"
     },
     {
-      "title": "Texture Close-Up",
+      "title": "텍스처 클로즈업",
       "hook": false, "star": true, "seconds": 6,
-      "action": ["Rub a drop between two fingers.", "Show how fast it absorbs."],
-      "visual": ["This should be the **hero product shot**."],
-      "subtitle": ["water-light → no sticky finish"],
-      "narration": ["“It literally melts in.”"],
+      "action": ["손가락 사이에서 제형을 문질러 보여 주세요.", "얼마나 빨리 스며드는지 보여 주세요."],
+      "visual": ["이 컷이 **핵심 제품 컷**입니다."],
+      "subtitle": ["물처럼 가벼운 제형 → 끈적임 없음"],
+      "narration": ["“진짜 물처럼 스며들어요.”"],
       "gifHint": "손가락 사이 텍스처"
     },
     {
-      "title": "Pat It In",
+      "title": "볼에 두드려 흡수",
       "hook": false, "star": false, "seconds": 6,
-      "action": ["Pat the serum into both cheeks."],
-      "visual": ["Close-up of your face in bright light."],
-      "subtitle": ["pat pat pat"],
+      "action": ["양 볼에 두드려 흡수시키세요."],
+      "visual": ["밝은 조명에서 얼굴을 클로즈업으로 잡으세요."],
+      "subtitle": ["톡톡톡"],
       "narration": [],
       "gifHint": "두 볼에 두드려 흡수"
     },
     {
-      "title": "Final Look + CTA",
+      "title": "마무리 컷 + 구매 유도",
       "hook": false, "star": false, "seconds": 6,
-      "action": ["Hold the bottle next to your face."],
-      "visual": ["Make sure the **LUMIA logo** is visible."],
-      "subtitle": ["glow unlocked ✨"],
-      "narration": ["“This is my glow step now.”"],
+      "action": ["제품을 얼굴 옆에 들어 보여 주세요."],
+      "visual": ["**LUMIA 로고**가 잘 보이게 하세요."],
+      "subtitle": ["광채 완성 ✨"],
+      "narration": ["“이제 이게 제 광채 단계예요.”"],
       "gifHint": "제품을 얼굴 옆에 들고 마무리"
     }
   ],
-  "stepNotes": [{ "afterStep": 2, "text": "Do not squeeze the dropper bulb too hard — it spills." }],
+  "stepNotes": [{ "afterStep": 2, "text": "스포이드 고무를 너무 세게 누르면 세럼이 흘러넘칩니다." }],
   "dos": [
-    { "title": "1. Show the texture clearly", "desc": "Close up, in focus, bright light." },
-    { "title": "Show the full routine", "desc": "Drop, rub, pat — in that order." },
-    { "title": "Say the key words", "desc": "\"Water-light serum.\" \"Niacinamide.\"" },
-    { "title": "Film in bright, even light", "desc": "Daylight or a ring light. Full HD or better." }
+    { "title": "1. 텍스처가 잘 보이게 찍으세요", "desc": "밝은 빛에서 초점을 맞춰 가까이 잡으세요." },
+    { "title": "사용 순서를 다 보여 주세요", "desc": "떨어뜨리기 → 문지르기 → 두드리기 순서대로." },
+    { "title": "핵심 문구를 말해 주세요", "desc": "\"물처럼 가벼운 세럼\", \"나이아신아마이드\"를 한 번씩." },
+    { "title": "밝고 고른 조명에서 찍으세요", "desc": "자연광이나 링라이트, Full HD 이상." }
   ],
   "donts": [
-    { "title": "do not show other brands", "desc": "No other skincare products in frame." },
-    { "title": "DO NOT use filters", "desc": "Show your real skin." }
+    { "title": "타사 제품이 나오면 안 됩니다", "desc": "다른 스킨케어 제품은 화면에 두지 마세요." },
+    { "title": "필터를 쓰면 안 됩니다", "desc": "실제 피부가 보이게 찍어 주세요." }
   ],
   "forbiddenWords": {
-    "note": "This is a cosmetic product, not a medicine.",
+    "note": "화장품이라 의약품처럼 들리는 표현은 쓸 수 없습니다.",
     "rows": [{ "dont": "treats dullness", "instead": "helps the look of dullness" }]
   },
   "sellingPointCoverage": [
-    { "point": "water-light texture that absorbs fast", "steps": [2] },
-    { "point": "instant glow", "steps": [4] }
+    { "point": "물처럼 가벼운 제형이 빠르게 스며드는 점", "steps": [2] },
+    { "point": "바르자마자 나는 광채", "steps": [4] }
   ],
   "sourceNotes": "- 30ml 스포이드 용기 (출처: deck.pptx)\n- 나이아신아마이드·히알루론산 (출처: deck.pptx)",
   "warnings": []

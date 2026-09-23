@@ -37,7 +37,7 @@ const DEFAULTS = {
    * 작성은 품질이 먼저라 opus, 편집은 기다림이 짧아야 해서 sonnet.
    * 별칭(opus/sonnet/haiku)은 CLI 가 그때그때 최신 모델로 푼다.
    */
-  models: { compose: 'opus', edit: 'sonnet' },
+  models: { compose: 'opus', edit: 'sonnet', translate: 'opus' },
   timeouts: { composeMs: 8 * 60_000, editMs: 3 * 60_000 },
 
   notion: {
