@@ -3,10 +3,12 @@ import { DATA_DIR, baseUrl, config, ensureDirs, appVersion } from './config.js';
 import { createServer } from './server.js';
 import { refreshAuth, claudeFound } from './claude/cli.js';
 import { pruneJobDirs, runningCount } from './jobs.js';
+import { pruneVideos } from './video/store.js';
 import { bindBusy, startUpdatePolling } from './update.js';
 
 ensureDirs();
 pruneJobDirs();
+pruneVideos(); // 오래된 영상은 지운다 — 만든 GIF 는 사진첩에 따로 있어 문서는 멀쩡하다
 
 const server = createServer();
 

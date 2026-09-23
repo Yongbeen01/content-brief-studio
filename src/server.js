@@ -10,6 +10,11 @@ import { listPublicChildPages } from './sources/notion-public.js';
 import * as store from './store.js';
 import { startJob, getJob, jobView, cancelJob } from './jobs.js';
 import { generateBrief, findPartnershipPage } from './brief/generate.js';
+import * as videos from './video/store.js';
+import { prepareVideo } from './video/prepare.js';
+import { matchClip } from './video/match.js';
+import { makeClipAsset, makePreviews } from './video/clip.js';
+import { toolsStatus } from './media/tools.js';
 import { runEdit, runInsert } from './brief/edit.js';
 import { translateDoc } from './brief/translate.js';
 import { docToMarkdown } from '../web/js/doc.js';
@@ -36,6 +41,9 @@ const MIME = {
  * Host 헤더 확인은 DNS 리바인딩(남의 도메인을 127.0.0.1 로 돌리는 수법)을 막는다.
  */
 const SESSION_TOKEN = crypto.randomBytes(24).toString('hex');
+
+/** 영상 id → 준비 작업 id. 같은 영상을 두 번 준비하지 않기 위한 것. */
+const preparing = new Map();
 
 function hostOk(req) {
   const host = String(req.headers.host ?? '').toLowerCase();
@@ -146,6 +154,7 @@ async function handleApi(req, res, url) {
       notion: notionState(),
       update: updateStatus(),
       models: config.models,
+      media: toolsStatus(),
     });
   }
 
@@ -182,6 +191,19 @@ async function handleApi(req, res, url) {
     if (!img) return json(res, 404, { error: '없는 사진입니다.' });
     res.writeHead(200, { 'content-type': img.mime, 'cache-control': 'private, max-age=86400' });
     return res.end(img.data);
+  }
+  if (m === 'GET' && p === '/api/videos') {
+    const list = videos.listVideos(url.searchParams.get('draft') ?? '').map(videos.publicView);
+    return json(res, 200, { videos: list });
+  }
+  // 후보 미리보기(소리 없는 작은 mp4) — 화면에서 <video> 로 돌려 본다.
+  if (m === 'GET' && /^\/api\/videos\/[^/]+\/preview\/\d+$/.test(p)) {
+    const [, , , id, , n] = p.split('/');
+    const file = videos.previewPath(id, Number(n));
+    if (!file || !fs.existsSync(file)) return json(res, 404, { error: '없는 미리보기입니다.' });
+    const data = fs.readFileSync(file);
+    res.writeHead(200, { 'content-type': 'video/mp4', 'content-length': data.length, 'cache-control': 'private, max-age=600' });
+    return res.end(data);
   }
   if (m === 'GET' && p === '/api/drafts/current') return json(res, 200, { draft: store.currentDraft() });
   if (m === 'GET' && p === '/api/drafts') return json(res, 200, { drafts: store.listDrafts() });
@@ -238,6 +260,42 @@ async function handleApi(req, res, url) {
     const meta = store.saveAsset({ name, mime, data, placeholder: req.headers['x-placeholder'] === '1' });
     return json(res, 200, { asset: { id: meta.id, name: meta.name, mime: meta.mime, size: meta.size } });
   }
+
+  // ── 영상 → 참고 GIF ──
+  if (m === 'POST' && p === '/api/videos') {
+    const name = decodeURIComponent(String(req.headers['x-file-name'] ?? ''));
+    const draftId = String(req.headers['x-draft-id'] ?? '');
+    const data = await readRaw(req, config.media.maxVideoBytes + 1024);
+    return json(res, 200, { video: videos.publicView(videos.addVideo({ name, data, draftId })) });
+  }
+  if (m === 'POST' && /^\/api\/videos\/[^/]+\/prepare$/.test(p)) {
+    const id = p.split('/')[3];
+    // 같은 영상을 두 번 준비하지 않는다 — 다른 스텝에서 동시에 눌러도 한 번만 돈다.
+    const live = getJob(preparing.get(id));
+    if (live && live.status === 'running') return json(res, 200, { jobId: live.id });
+    const job = startJob('video-prepare', ({ progress, signal, dir }) => prepareVideo({ id, jobDir: dir, onProgress: progress, signal })
+      .then((rec) => ({ video: videos.publicView(rec) })));
+    preparing.set(id, job.id);
+    return json(res, 200, { jobId: job.id });
+  }
+  if (m === 'POST' && /^\/api\/videos\/[^/]+\/match$/.test(p)) {
+    const id = p.split('/')[3];
+    const body = await readJson(req, 16 * 1024 * 1024);
+    const job = startJob('video-match', async ({ progress, signal, dir }) => {
+      const { candidates, usage } = await matchClip({ videoId: id, doc: body.doc, path: body.path, jobDir: dir, onProgress: progress, signal });
+      return { candidates: await makePreviews({ videoId: id, candidates, signal, onProgress: progress }), usage };
+    });
+    return json(res, 200, { jobId: job.id });
+  }
+  if (m === 'POST' && /^\/api\/videos\/[^/]+\/clip$/.test(p)) {
+    const id = p.split('/')[3];
+    const body = await readJson(req);
+    const job = startJob('video-clip', ({ progress, signal }) => makeClipAsset({
+      videoId: id, start: Number(body.start), end: Number(body.end), label: body.label, signal, onProgress: progress,
+    }));
+    return json(res, 200, { jobId: job.id });
+  }
+  if (m === 'DELETE' && p.startsWith('/api/videos/')) return json(res, 200, { ok: videos.removeVideo(p.split('/').pop()) });
 
   if (m === 'POST' && p === '/api/generate') {
     const body = await readJson(req);

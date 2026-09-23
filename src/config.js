@@ -20,6 +20,8 @@ export const DIRS = {
   assets: path.join(DATA_DIR, 'assets'),
   sources: path.join(DATA_DIR, 'sources'),
   jobs: path.join(DATA_DIR, 'jobs'),
+  videos: path.join(DATA_DIR, 'videos'),
+  tools: path.join(DATA_DIR, 'tools'),
   logs: path.join(DATA_DIR, 'logs'),
 };
 
@@ -35,10 +37,25 @@ const DEFAULTS = {
 
   /**
    * 작성은 품질이 먼저라 opus, 편집은 기다림이 짧아야 해서 sonnet.
+   * 영상: 화면 설명은 영상당 한 번뿐이고 양이 많아 haiku, 구간 고르기는 판단이 결과 품질이라 opus.
    * 별칭(opus/sonnet/haiku)은 CLI 가 그때그때 최신 모델로 푼다.
    */
-  models: { compose: 'opus', edit: 'sonnet', translate: 'opus' },
-  timeouts: { composeMs: 8 * 60_000, editMs: 3 * 60_000 },
+  models: { compose: 'opus', edit: 'sonnet', translate: 'opus', frames: 'claude-haiku-4-5', match: 'claude-opus-5' },
+  timeouts: { composeMs: 8 * 60_000, editMs: 3 * 60_000, framesMs: 8 * 60_000, matchMs: 4 * 60_000, mediaMs: 10 * 60_000 },
+
+  /** 영상 → 참고 GIF */
+  media: {
+    maxVideoSec: 120,            // 넘으면 앞부분만 쓴다
+    maxVideoBytes: 500 * 1024 * 1024,
+    sheetCells: 12,              // 3x4 격자 한 장에 12초
+    clipMinSec: 3,
+    clipMaxSec: 10,
+    gifWidth: 480,
+    gifFps: 12,
+    gifMaxBytes: 8 * 1024 * 1024, // 넘으면 품질을 낮춰 다시 만든다
+    speech: true,                 // 말소리 받아쓰기(실패해도 진행)
+    keepVideoDays: 14,
+  },
 
   notion: {
     /** 팀 설정 코드로 들어온다. 레포에는 없다. */

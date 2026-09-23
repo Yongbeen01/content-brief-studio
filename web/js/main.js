@@ -5,6 +5,7 @@ import { lintDoc } from './lint.js';
 import { renderDoc, setInline } from './preview.js';
 import { createEditor } from './editor.js';
 import { englishLabel, placeholderBlob, uploadImage } from './slots.js';
+import { createVideoPicker } from './video.js';
 
 const $ = (id) => document.getElementById(id);
 const inline = createInline(window.markdownit);
@@ -229,6 +230,7 @@ async function removeSource(id) {
 // ── 미리보기 · 경고 ─────────────────────────────────────────────────────────
 
 let editor = null;
+let videoPicker = null;
 
 /**
  * 지금 폼 입력을 반영한 문서. 입력에서 바로 나오는 두 곳 — 페이지 제목과 Account Tag 줄 — 은
@@ -509,10 +511,15 @@ function pickFromPc() {
 function onSlotClick(path, el) {
   slotTarget = { path, el };
   const photos = sourcePhotos();
-  if (!photos.length) return pickFromPc();
   const node = getAt(state.draft.doc, path) ?? {};
+  // 스텝의 참고 GIF 자리는 영상에서 잘라 넣을 수 있다 — 고를 사진이 없어도 창을 연다.
+  const isStep = node.slot === 'step';
+  if (!photos.length && !isStep) return pickFromPc();
+  $('slot_video').classList.toggle('hidden', !isStep);
   const what = node.slot === 'product' ? '제품 이미지' : node.label || '사진';
-  $('slot_where').textContent = `「${what}」 자리 — 사측 공유 파일에서 찾은 사진입니다. 누르면 그 자리에 들어갑니다.`;
+  $('slot_where').textContent = photos.length
+    ? `「${what}」 자리 — 사측 공유 파일에서 찾은 사진입니다. 누르면 그 자리에 들어갑니다.`
+    : `「${what}」 자리 — 영상에서 잘라 넣거나, 내 컴퓨터에서 사진을 고르세요.`;
   $('slot_grid').replaceChildren(...photos.map((im) => {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -898,9 +905,21 @@ function wire() {
   }
   $('slot_file').addEventListener('change', onSlotFile);
   $('slot_from_pc').addEventListener('click', () => { $('slot_dialog').close(); pickFromPc(); });
+  $('slot_video').addEventListener('click', () => {
+    const t = slotTarget;
+    $('slot_dialog').close();
+    if (t) videoPicker.open(t.path);
+  });
   document.addEventListener('keydown', (e) => {
     const inField = /^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName);
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !inField && !e.shiftKey) { e.preventDefault(); undo(); }
+  });
+
+  videoPicker = createVideoPicker({
+    getDoc: () => clone(currentDoc()),
+    getDraftId: () => state.draft.id,
+    commit: (next) => commitDoc(next),
+    toast,
   });
 
   editor = createEditor({
