@@ -7,10 +7,11 @@ import path from 'node:path';
 // 설정·토큰 파일이 사용자 폴더를 건드리지 않게 — config 를 불러오기 전에 정한다.
 process.env.CBS_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'cbs-notion-'));
 
-const { createNotionClient, GuardError } = await import('../src/notion/client.js');
+const { createNotionClient, GuardError, SINGLE_PART_MAX, PART_BYTES } = await import('../src/notion/client.js');
 const { publishDoc, splitForRequest, depth, grayPng } = await import('../src/notion/publish.js');
 const { docToBlocks, richText, apiColor } = await import('../src/notion/convert.js');
 const { buildDoc } = await import('../src/brief/build.js');
+const { imageSlots } = await import('../web/js/doc.js');
 const { applyTranslations, collectTranslatable } = await import('../web/js/translatable.js');
 const oauth = await import('../src/notion/oauth.js');
 const { config, saveUserConfig } = await import('../src/config.js');
@@ -62,8 +63,13 @@ function fakeNotion({ failAppendAt = -1 } = {}) {
       results.forEach((r) => tree.set(r.id.replace(/-/g, ''), []));
       return ok({ results });
     }
-    if (init.method === 'POST' && u.pathname === '/v1/file_uploads') return ok({ id: newId(), upload_url: 'x' });
-    if (init.method === 'POST' && /\/send$/.test(u.pathname)) return ok({ status: 'uploaded' });
+    if (init.method === 'POST' && u.pathname === '/v1/file_uploads') { entry.body = body; return ok({ id: newId(), upload_url: 'x' }); }
+    if (init.method === 'POST' && /\/send$/.test(u.pathname)) {
+      entry.part = init.body.get('part_number');
+      entry.bytes = init.body.get('file').size;
+      return ok({ status: 'uploaded' });
+    }
+    if (init.method === 'POST' && /\/complete$/.test(u.pathname)) return ok({ status: 'uploaded' });
     if (init.method === 'PATCH' && u.pathname.startsWith('/v1/pages/')) { entry.archived = body.archived; return ok({}); }
     return { ok: false, status: 404, text: async () => '{}', headers: new Headers() };
   };
@@ -153,6 +159,39 @@ test('게시: 모든 요청이 중첩 2단·100개 이하, 순서 유지, 사진
   const top = fake.tree.get(pageId);
   assert.deepEqual(top.slice(0, 4), ['callout', 'callout', 'heading_1', 'image']);
   assert.equal(top[top.length - 1], 'callout');
+});
+
+test('파일 올리기: 20MB 까지는 한 번에, 넘으면 10MB 조각으로 나눠 보내고 합친다', async () => {
+  const small = fakeNotion();
+  await client(small).uploadFile({ filename: 'a.gif', contentType: 'image/gif', data: Buffer.alloc(SINGLE_PART_MAX) });
+  assert.equal(small.log[0].body.mode, 'single_part');
+  assert.deepEqual(small.log.slice(1).map((e) => [e.path.split('/').pop(), e.part]), [['send', null]]);
+
+  const big = fakeNotion();
+  const size = 25 * 1024 * 1024;
+  const id = await client(big).uploadFile({ filename: 'big.gif', contentType: 'image/gif', data: Buffer.alloc(size) });
+  assert.ok(id);
+  assert.deepEqual(big.log[0].body, { mode: 'multi_part', number_of_parts: 3, filename: 'big.gif', content_type: 'image/gif' });
+  const sends = big.log.filter((e) => e.path.endsWith('/send'));
+  assert.deepEqual(sends.map((e) => e.part), ['1', '2', '3']);
+  assert.deepEqual(sends.map((e) => e.bytes), [PART_BYTES, PART_BYTES, size - 2 * PART_BYTES]);
+  assert.match(big.log[big.log.length - 1].path, /\/complete$/); // 조각을 다 보낸 뒤에 합친다
+});
+
+test('게시: 20MB 넘는 GIF 도 올라간다', async () => {
+  const { doc } = buildDoc(sample, inputs, {});
+  const en = english(doc);
+  const slot = imageSlots(en)[0].node;
+  slot.asset = { id: 'big' };
+  const fake = fakeNotion();
+  await publishDoc({
+    doc: en,
+    client: client(fake),
+    readAsset: (id) => (id === 'big' ? { data: Buffer.alloc(30 * 1024 * 1024), mime: 'image/gif', name: 'big.gif' } : null),
+    parentPageId: PARENT,
+  });
+  const creates = fake.log.filter((e) => e.path === '/v1/file_uploads');
+  assert.deepEqual(creates.filter((e) => e.body.mode === 'multi_part').map((e) => e.body.filename), ['big.gif']);
 });
 
 test('게시: 이미 영어본이면 다시 옮기지 않는다', async () => {

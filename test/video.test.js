@@ -169,7 +169,7 @@ test('ffmpeg 진행 줄 읽기', () => {
   assert.equal(parseProgress('frame=12 fps=0.0'), null);
 });
 
-test('영상 보관 — 형식·크기 검사, 꺼낸 것 다시 읽기', () => {
+test('영상 보관 — 형식 검사, 꺼낸 것 다시 읽기', () => {
   assert.throws(() => store.addVideo({ name: 'a.txt', data: Buffer.alloc(10) }), /mp4·mov·webm/);
   assert.equal(store.kindOf('a.MOV'), 'video/quicktime');
   assert.equal(store.kindOf('a.gif'), null);
@@ -190,6 +190,23 @@ test('영상 보관 — 형식·크기 검사, 꺼낸 것 다시 읽기', () => 
 
   assert.equal(store.removeVideo(rec.id), true);
   assert.equal(store.getVideo(rec.id), null);
+});
+
+test('영상 받기 — 요청 본문을 바로 디스크로, 크기 제한 없이', async () => {
+  const { Readable } = await import('node:stream');
+  const chunks = () => Readable.from([Buffer.alloc(3000, 5), Buffer.alloc(5000, 6)]);
+  await assert.rejects(store.receiveVideo(chunks(), { name: 'a.txt' }), /mp4·mov·webm/);
+  const rec = await store.receiveVideo(chunks(), { name: 'big.MOV', draftId: 'recv' });
+  assert.equal(rec.size, 8000);
+  assert.equal(fs.statSync(store.originalPath(rec.id)).size, 8000);
+  assert.equal(path.basename(store.originalPath(rec.id)), 'original.mov');
+  // 버퍼로 넣은 것과 해시가 같다 — 같은 영상은 한 번만 읽는다
+  const again = store.addVideo({ name: 'same.mov', data: Buffer.concat([Buffer.alloc(3000, 5), Buffer.alloc(5000, 6)]), draftId: 'recv' });
+  assert.equal(again.id, rec.id);
+  // 받다 끊기면 임시 파일을 남기지 않는다
+  const broken = new Readable({ read() { this.destroy(new Error('끊김')); } });
+  await assert.rejects(store.receiveVideo(broken, { name: 'x.mp4' }), /끊김/);
+  assert.deepEqual(fs.readdirSync(path.join(process.env.CBS_DIR, 'videos')).filter((f) => f.startsWith('.upload-')), []);
 });
 
 test('구간 고르기 — 영상 여러 개를 함께 보고, 답은 다듬어 돌려준다', async () => {

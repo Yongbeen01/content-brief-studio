@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { pipeline } from 'node:stream/promises';
 import { DIRS, config, ensureDirs } from '../config.js';
 
 /**
@@ -65,27 +66,37 @@ export function publicView(rec) {
   return { id, name, size, status, error, durationSec, usedSec, trimmed, sheets, hasAudio, speechLines, frames, createdAt };
 }
 
-export function addVideo({ name, data, draftId = '' }) {
+/**
+ * 받는 중인 영상의 임시 파일. 다 받으면 영상 폴더로 옮긴다.
+ * 이름이 id 모양이 아니라 목록에는 안 잡히고, 받다 앱이 꺼져 남은 것은 pruneVideos 가 치운다.
+ */
+function uploadTmp(name) {
+  if (!kindOf(name)) throw new Error('mp4·mov·webm 영상만 올릴 수 있습니다.');
   ensureDirs();
   fs.mkdirSync(DIRS.videos, { recursive: true });
-  if (!kindOf(name)) throw new Error('mp4·mov·webm 영상만 올릴 수 있습니다.');
-  if (data.length > config.media.maxVideoBytes) throw new Error(`영상이 ${Math.round(config.media.maxVideoBytes / 1048576)}MB 를 넘습니다.`);
+  return path.join(DIRS.videos, `.upload-${crypto.randomBytes(6).toString('hex')}`);
+}
+
+/** 다 받은 임시 파일을 영상으로 등록한다. */
+function adopt({ name, tmp, size, hash, draftId }) {
   // 같은 영상을 여러 스텝에 올리는 일이 흔하다. 바이트가 같으면 이미 올린 것을 그대로 쓴다 —
   // 화면 읽기(제일 비싼 호출)를 영상마다 한 번만 하기 위해서다.
-  const hash = crypto.createHash('sha256').update(data).digest('hex');
   // listVideos('') 는 전부를 뜻하므로 초안 id 를 직접 맞춘다 — 다른 초안의 영상을 물고 오면 안 된다.
   const same = listVideos().find((v) => v.hash === hash && String(v.draftId) === String(draftId)
     && v.status !== 'error' && fs.existsSync(path.join(dirOf(v.id), v.file)));
-  if (same) return same;
+  if (same) {
+    fs.rmSync(tmp, { force: true });
+    return same;
+  }
   const id = crypto.randomBytes(8).toString('hex');
   fs.mkdirSync(dirOf(id), { recursive: true });
-  fs.writeFileSync(path.join(dirOf(id), `original${path.extname(name).toLowerCase()}`), data);
+  fs.renameSync(tmp, path.join(dirOf(id), `original${path.extname(name).toLowerCase()}`));
   return save({
     id,
     draftId: String(draftId),
     hash,
     name: String(name),
-    size: data.length,
+    size,
     file: `original${path.extname(name).toLowerCase()}`,
     status: 'new',
     error: '',
@@ -98,6 +109,35 @@ export function addVideo({ name, data, draftId = '' }) {
     frames: 0,
     createdAt: Date.now(),
   });
+}
+
+export function addVideo({ name, data, draftId = '' }) {
+  const tmp = uploadTmp(name);
+  fs.writeFileSync(tmp, data);
+  return adopt({ name, tmp, size: data.length, hash: crypto.createHash('sha256').update(data).digest('hex'), draftId });
+}
+
+/**
+ * 올리는 영상을 요청 본문에서 바로 디스크로 받는다. 크기 제한이 없어서 — 몇 GB 짜리를
+ * 메모리에 통째로 올리지 않도록 받으면서 해시를 같이 잰다.
+ */
+export async function receiveVideo(stream, { name, draftId = '' }) {
+  const tmp = uploadTmp(name);
+  const hash = crypto.createHash('sha256');
+  let size = 0;
+  try {
+    await pipeline(stream, async function* measure(src) {
+      for await (const chunk of src) {
+        hash.update(chunk);
+        size += chunk.length;
+        yield chunk;
+      }
+    }, fs.createWriteStream(tmp));
+  } catch (e) {
+    fs.rmSync(tmp, { force: true });
+    throw e;
+  }
+  return adopt({ name, tmp, size, hash: hash.digest('hex'), draftId });
 }
 
 export const originalPath = (id) => {

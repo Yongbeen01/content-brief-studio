@@ -46,8 +46,7 @@ const DEFAULTS = {
 
   /** 영상 → 참고 GIF */
   media: {
-    maxVideoSec: 120,            // 넘으면 앞부분만 쓴다
-    maxVideoBytes: 500 * 1024 * 1024,
+    maxVideoSec: 120,            // 넘으면 앞부분만 쓴다(올리는 크기에는 제한이 없다)
     sheetCells: 12,              // 3x4 격자 한 장에 12초
     clipMinSec: 3,
     clipMaxSec: 10,

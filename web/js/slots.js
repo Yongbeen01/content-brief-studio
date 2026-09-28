@@ -8,11 +8,10 @@ import { uploadAsset } from './api.js';
  */
 
 export const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
-export const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 
+/** 크기 제한은 없다 — 노션에 20MB 가 넘는 파일은 서버가 나눠 올린다. */
 export function checkImage(file) {
   if (!IMAGE_TYPES.includes(file.type)) return 'png·jpg·gif·webp 이미지만 넣을 수 있습니다.';
-  if (file.size > MAX_IMAGE_BYTES) return '이미지가 20MB 를 넘습니다(노션 한 번 올리기 한도).';
   return '';
 }
 

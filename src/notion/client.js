@@ -16,6 +16,10 @@ import { normalizeId } from '../config.js';
 const API = 'https://api.notion.com';
 const RETRY_STATUS = new Set([409, 429, 500, 502, 503, 504]);
 
+/** 한 번에 올릴 수 있는 크기(노션 20MB). 넘으면 조각으로 — 조각은 5~20MB, 마지막 조각만 작아도 된다. */
+export const SINGLE_PART_MAX = 20 * 1000 * 1000;
+export const PART_BYTES = 10 * 1024 * 1024;
+
 export class GuardError extends Error {}
 
 export class NotionApiError extends Error {
@@ -88,7 +92,7 @@ export function createNotionClient({
       }
       return;
     }
-    if (method === 'POST' && (path === '/v1/file_uploads' || /^\/v1\/file_uploads\/[^/]+\/send$/.test(path))) return;
+    if (method === 'POST' && (path === '/v1/file_uploads' || /^\/v1\/file_uploads\/[^/]+\/(send|complete)$/.test(path))) return;
     if (method === 'POST' && path === '/v1/oauth/token') return;
     throw new GuardError(`쓰기 가드: 허락되지 않은 요청입니다 (${method} ${path}).`);
   }
@@ -176,16 +180,33 @@ export function createNotionClient({
     appendChildren: (id, children) => request('PATCH', `/v1/blocks/${normalizeId(id)}/children`, { children }),
     archivePage: (id) => request('PATCH', `/v1/pages/${normalizeId(id)}`, { archived: true }),
     /**
-     * 파일 하나를 노션에 올리고 file_upload id 를 돌려준다(한 번에 20MB 까지).
+     * 파일 하나를 노션에 올리고 file_upload id 를 돌려준다. 20MB 까지는 한 번에, 넘으면 10MB 씩
+     * 나눠 보내고 합친다. 나눠 올리기는 유료 워크스페이스에서만 되고 파일 하나 5GB 까지다 —
+     * 그 밖이면 노션이 거절하고, 그 말이 그대로 화면에 뜬다.
      * 올린 파일은 한 시간 안에 블록에 붙여야 한다 — 게시 흐름이 곧바로 붙인다.
      */
     uploadFile: async ({ filename, contentType, data }) => {
+      const send = (id, bytes, partNumber) => {
+        const form = new FormData();
+        form.append('file', new Blob([bytes], { type: contentType }), filename);
+        if (partNumber) form.append('part_number', String(partNumber));
+        return request('POST', `/v1/file_uploads/${id}/send`, undefined, { form });
+      };
+      if (data.length <= SINGLE_PART_MAX) {
+        const upload = await request('POST', '/v1/file_uploads', {
+          mode: 'single_part', filename, content_type: contentType,
+        });
+        await send(upload.id, data);
+        return upload.id;
+      }
+      const parts = Math.ceil(data.length / PART_BYTES);
       const upload = await request('POST', '/v1/file_uploads', {
-        mode: 'single_part', filename, content_type: contentType,
+        mode: 'multi_part', number_of_parts: parts, filename, content_type: contentType,
       });
-      const form = new FormData();
-      form.append('file', new Blob([data], { type: contentType }), filename);
-      await request('POST', `/v1/file_uploads/${upload.id}/send`, undefined, { form });
+      for (let i = 0; i < parts; i += 1) {
+        await send(upload.id, data.subarray(i * PART_BYTES, (i + 1) * PART_BYTES), i + 1);
+      }
+      await request('POST', `/v1/file_uploads/${upload.id}/complete`);
       return upload.id;
     },
   };

@@ -62,13 +62,12 @@ export function listDrafts(limit = 20) {
 // ── 사진 ────────────────────────────────────────────────────────────────────
 
 export const ASSET_MIME = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/gif': '.gif', 'image/webp': '.webp' };
-export const MAX_ASSET_BYTES = 20 * 1024 * 1024;
 
+/** 크기 제한은 없다 — 노션에는 20MB 가 넘으면 나눠 올린다(notion/client.js). */
 export function saveAsset({ name, mime, data, placeholder = false }) {
   ensureDirs();
   const ext = ASSET_MIME[mime];
   if (!ext) throw new Error('png·jpg·gif·webp 이미지만 넣을 수 있습니다.');
-  if (data.length > MAX_ASSET_BYTES) throw new Error('이미지가 20MB 를 넘습니다(노션 한 번 올리기 한도).');
   const id = crypto.randomBytes(10).toString('hex');
   fs.writeFileSync(path.join(DIRS.assets, `${id}${ext}`), data);
   const meta = { id, name: String(name || `image${ext}`).slice(0, 200), mime, size: data.length, placeholder: !!placeholder, createdAt: Date.now() };

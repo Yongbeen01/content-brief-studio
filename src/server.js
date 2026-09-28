@@ -259,7 +259,7 @@ async function handleApi(req, res, url) {
   if (m === 'POST' && p === '/api/assets') {
     const mime = String(req.headers['content-type'] ?? '').split(';')[0].trim();
     const name = decodeURIComponent(String(req.headers['x-file-name'] ?? ''));
-    const data = await readRaw(req, store.MAX_ASSET_BYTES + 1024);
+    const data = await readRaw(req, Infinity); // 크기 제한 없음 — 노션에는 나눠 올린다
     const meta = store.saveAsset({ name, mime, data, placeholder: req.headers['x-placeholder'] === '1' });
     return json(res, 200, { asset: { id: meta.id, name: meta.name, mime: meta.mime, size: meta.size } });
   }
@@ -268,8 +268,7 @@ async function handleApi(req, res, url) {
   if (m === 'POST' && p === '/api/videos') {
     const name = decodeURIComponent(String(req.headers['x-file-name'] ?? ''));
     const draftId = String(req.headers['x-draft-id'] ?? '');
-    const data = await readRaw(req, config.media.maxVideoBytes + 1024);
-    return json(res, 200, { video: videos.publicView(videos.addVideo({ name, data, draftId })) });
+    return json(res, 200, { video: videos.publicView(await videos.receiveVideo(req, { name, draftId })) });
   }
   if (m === 'POST' && /^\/api\/videos\/[^/]+\/prepare$/.test(p)) {
     const id = p.split('/')[3];
@@ -394,7 +393,9 @@ async function handleApi(req, res, url) {
 }
 
 export function createServer() {
-  return http.createServer(async (req, res) => {
+  // 올리는 크기에 제한이 없어서 요청 하나를 다 받는 시간도 묶지 않는다(Node 기본 5분).
+  // 127.0.0.1 에서만 받으므로 느린 요청으로 자원을 묶는 공격은 걱정할 필요가 없다.
+  return http.createServer({ requestTimeout: 0 }, async (req, res) => {
     try {
       if (!hostOk(req)) return json(res, 421, { error: 'host not allowed' });
       const url = new URL(req.url, `http://${req.headers.host}`);

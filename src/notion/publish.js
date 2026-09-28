@@ -136,7 +136,6 @@ export async function publishDoc({
       const w = 540;
       file = { data: grayPng(w, w * (s.node.ratio || 1)), mime: 'image/png', name: `placeholder-${s.node.id}.png` };
     }
-    if (file.data.length > 20 * 1024 * 1024) throw new Error(`사진이 20MB 를 넘습니다: ${file.name}`);
     uploads.set(s.node.id, await client.uploadFile({ filename: file.name, contentType: file.mime, data: file.data }));
   }
   onProgress({ phase: 'images', done: slots.length, total: slots.length, detail: '사진을 모두 올렸습니다' });
