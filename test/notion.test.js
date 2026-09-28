@@ -11,8 +11,15 @@ const { createNotionClient, GuardError } = await import('../src/notion/client.js
 const { publishDoc, splitForRequest, depth, grayPng } = await import('../src/notion/publish.js');
 const { docToBlocks, richText, apiColor } = await import('../src/notion/convert.js');
 const { buildDoc } = await import('../src/brief/build.js');
+const { applyTranslations, collectTranslatable } = await import('../web/js/translatable.js');
 const oauth = await import('../src/notion/oauth.js');
 const { config, saveUserConfig } = await import('../src/config.js');
+
+/** 옮기기를 마친 영어본 흉내 — 한국어 줄을 전부 영어 글자로 바꾼다. */
+const english = (doc) => {
+  const items = collectTranslatable(doc);
+  return applyTranslations(doc, items, items.map((_, i) => `English line ${i}`));
+};
 
 const PARENT = '3d439fd7477e80058995edf04a5d1586';
 const sample = JSON.parse(fs.readFileSync(new URL('./fixtures/compose-sample.json', import.meta.url), 'utf8'));
@@ -150,23 +157,28 @@ test('게시: 모든 요청이 중첩 2단·100개 이하, 순서 유지, 사진
 
 test('게시: 이미 영어본이면 다시 옮기지 않는다', async () => {
   const { doc } = buildDoc(sample, inputs, {});
-  const fake = fakeNotion();
   let called = 0;
-  await publishDoc({
-    doc: { ...doc, lang: 'en' },
-    client: client(fake),
+  const publishEn = (d) => publishDoc({
+    doc: d,
+    client: client(fakeNotion()),
     readAsset: () => ({ data: Buffer.from('png'), mime: 'image/png', name: 'a.png' }),
     parentPageId: PARENT,
-    translate: async (d) => { called += 1; return d; },
+    translate: async (x) => { called += 1; return english(x); },
   });
+  await publishEn(english(doc));
   assert.equal(called, 0);
+  // 영어본이어도 사람이 한국어로 고친 줄이 남아 있으면(불러온 영어 브리프 등) 그 줄은 옮긴다
+  const en = english(doc);
+  en.nodes.find((n) => n.type === 'step').title = '한국어로 고친 제목';
+  await publishEn(en);
+  assert.equal(called, 1);
 });
 
 test('게시: 중간 실패면 만든 페이지를 보관한다', async () => {
   const { doc } = buildDoc(sample, inputs, {});
   const fake = fakeNotion({ failAppendAt: 2 });
   await assert.rejects(
-    publishDoc({ doc: { ...doc, lang: 'en' }, client: client(fake), readAsset: () => null, parentPageId: PARENT }),
+    publishDoc({ doc: english(doc), client: client(fake), readAsset: () => null, parentPageId: PARENT }),
     (e) => e.rolledBack === true,
   );
   assert.ok(fake.log.some((e) => e.method === 'PATCH' && e.archived === true));

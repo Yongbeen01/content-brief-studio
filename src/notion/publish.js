@@ -1,5 +1,6 @@
 import zlib from 'node:zlib';
 import { imageSlots } from '../../web/js/doc.js';
+import { collectTranslatable } from '../../web/js/translatable.js';
 import { docToBlocks } from './convert.js';
 
 /**
@@ -117,11 +118,13 @@ export async function publishDoc({
   onProgress({ phase: 'check', detail: '노션 부모 페이지 확인' });
   await client.retrievePage(parentPageId);
 
-  // 미리보기는 한국어, 노션은 영어 — 올리기 직전에 영어본을 만든다.
-  const docEn = doc.lang === 'en' ? doc : await translate(doc);
+  // 미리보기는 한국어, 노션은 영어 — 올리기 직전에 영어본을 만든다. 이미 영어인 문서(영어 브리프를
+  // 불러온 것·옮겨 둔 영어본)는 사람이 한국어로 고친 줄이 남아 있을 때만 그 줄을 옮긴다.
+  const needs = doc.lang !== 'en' || collectTranslatable(doc).length > 0;
+  const docEn = needs ? await translate(doc) : doc;
 
-  // 1. 사진
-  const slots = imageSlots(doc);
+  // 1. 사진 — 원본에 사진이 없던 자리(optional)가 비어 있으면 아무것도 올리지 않는다.
+  const slots = imageSlots(doc).filter((s) => s.node?.asset || placeholders[s.node?.id] || !s.node?.optional);
   const uploads = new Map();
   let i = 0;
   for (const s of slots) {

@@ -194,12 +194,17 @@ export async function listPublicChildPages(url, opts = {}) {
     .map((b) => ({ id: b.id.replace(/-/g, ''), title: plain(b.properties?.title, blocks) }));
 }
 
-async function loadPublicBlocks(url, { fetchImpl = fetch, maxChunks = 40 } = {}) {
+/**
+ * 공개 페이지의 블록 전부. `base` 는 실제로 읽힌 호스트 — 사진 주소 서명도 같은 곳에 묻는다.
+ * @returns {Promise<{ blocks: Record<string, object>, rootId: string, base: string }>}
+ */
+export async function loadPublicBlocks(url, { fetchImpl = fetch, maxChunks = 40 } = {}) {
   const pageId = extractPageId(url);
   if (!pageId) throw new Error('노션 링크에서 페이지 id 를 찾지 못했습니다. 공유 → 링크 복사로 받은 주소인지 확인해 주세요.');
   const rootId = dashed(pageId);
   let blocks = {};
   let lastErr = null;
+  let used = '';
   for (const base of apiBases(url)) {
     blocks = {};
     try {
@@ -213,7 +218,7 @@ async function loadPublicBlocks(url, { fetchImpl = fetch, maxChunks = 40 } = {})
         cursor = j.cursor;
         chunk += 1;
       } while (cursor?.stack?.length && chunk < maxChunks);
-      if (blocks[rootId]) break;
+      if (blocks[rootId]) { used = base; break; }
     } catch (e) {
       lastErr = e;
     }
@@ -221,7 +226,24 @@ async function loadPublicBlocks(url, { fetchImpl = fetch, maxChunks = 40 } = {})
   if (!blocks[rootId]) {
     throw lastErr ?? new Error('노션 페이지를 찾지 못했습니다. 페이지가 웹에 공개돼 있지 않거나 링크가 틀렸습니다.');
   }
-  return { blocks, rootId };
+  return { blocks, rootId, base: used };
+}
+
+/**
+ * 공개 페이지에 올라간 파일(attachment:… · S3 주소)을 받을 수 있는 서명된 주소로 바꾼다. 실패한 자리는 ''.
+ * 읽기 전용 호출이다(노션 웹이 사진을 보여 줄 때 부르는 것과 같다).
+ * @param {{ src:string, blockId:string, spaceId:string }[]} files
+ */
+export async function signPublicFiles(base, files, { fetchImpl = fetch } = {}) {
+  if (!files.length) return [];
+  try {
+    const j = await post(base, 'getSignedFileUrls', {
+      urls: files.map((f) => ({ url: f.src, permissionRecord: { table: 'block', id: f.blockId, spaceId: f.spaceId } })),
+    }, fetchImpl);
+    return files.map((f, i) => String(j?.signedUrls?.[i] ?? ''));
+  } catch {
+    return files.map(() => '');
+  }
 }
 
 /**

@@ -8,6 +8,7 @@ import { COMPOSE, fixEscapes, validate } from './schema.js';
 import { composeSystem, composeUser } from './prompts.js';
 import { buildDoc, splitPoints } from './build.js';
 import { collectCandidates, pickProductImage } from './product-image.js';
+import { translateDoc } from './translate.js';
 import { lintDoc } from '../../web/js/lint.js';
 import { inline } from './inline.js';
 
@@ -18,6 +19,9 @@ import { inline } from './inline.js';
  * 2. 작성(Claude 1회). 결과 모양이 틀리거나 소구점을 안 보여 주는 스텝이 있으면 사유를 붙여 한 번 더.
  *    그 사이에 제품 사진 고르기를 **같이 돌린다**(다른 Claude 호출이라 기다림이 겹치지 않는다).
  * 3. 코드가 고정 틀과 합쳐 문서를 만들고 검사한다.
+ * 4. 미리보기를 보여 주기 전에 **영어본까지 만들어 둔다** — [영어로 보기]를 누르면 기다림 없이 바로 나온다.
+ *    옮긴 줄은 캐시(enCache)로 같이 돌려준다. 나중에 한 줄 고치면 그 줄만 다시 옮긴다.
+ *    옮기기가 실패해도 기획서는 그대로 나온다(그때는 [영어로 보기]를 누를 때 옮긴다).
  */
 
 export const REQUIRED_INPUTS = ['briefName', 'uploadUrl', 'accountId', 'sellingPoints', 'concept'];
@@ -96,9 +100,12 @@ function uncoveredPoints(value, points) {
  * @param {AbortSignal} [o.signal]
  * @param {(brand:string)=>Promise<string>} [o.lookupPartnership]
  * @param {(sourceId:string, n:number)=>object|null} [o.useImage]  고른 사진을 사진첩에 넣어 준다
+ * @param {boolean} [o.pretranslate]   영어본까지 만들어 둔다(기본 켬)
  * @param {typeof runClaude} [o.run]   테스트에서 가짜로 바꿔 끼운다
  */
-export async function generateBrief({ inputs, sourceIds = [], jobDir, onProgress = () => {}, signal, lookupPartnership, useImage, run = runClaude }) {
+export async function generateBrief({
+  inputs, sourceIds = [], jobDir, onProgress = () => {}, signal, lookupPartnership, useImage, pretranslate = true, run = runClaude,
+}) {
   const inputErrs = validateInputs(inputs);
   if (inputErrs.length) throw new Error(inputErrs.join(' · '));
   fs.mkdirSync(jobDir, { recursive: true });
@@ -181,8 +188,23 @@ export async function generateBrief({ inputs, sourceIds = [], jobDir, onProgress
   if (!partnershipUrl) warnings.push(`「[${value.brandName}] … Partnership Ads」 안내 페이지를 찾지 못해 📢 박스의 파트너십 코드 줄을 뺐습니다 — 필요하면 박스를 눌러 추가하세요`);
 
   const { doc, notes } = buildDoc(value, inputs, { partnershipUrl, productAsset });
+
+  let docEn = null;
+  const enCache = {};
+  if (pretranslate) {
+    onProgress({ phase: 'translate', detail: '영어본을 미리 만드는 중' });
+    try {
+      docEn = await translateDoc({ doc, jobDir, signal, onProgress, run, cache: enCache });
+    } catch (e) {
+      if (e?.kind === 'cancelled' || signal?.aborted) throw e;
+      infos.push('영어본을 미리 만들지 못했습니다 — [영어로 보기]나 [노션에 최종 생성]을 누를 때 옮깁니다');
+    }
+  }
+
   return {
     doc,
+    docEn,
+    enCache,
     sourceNotes: String(value.sourceNotes ?? '').trim(),
     coverage: value.sellingPointCoverage ?? [],
     warnings: [...warnings, ...(value.warnings ?? []), ...notes],

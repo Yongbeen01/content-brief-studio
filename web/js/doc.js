@@ -1,14 +1,19 @@
 /**
  * 문서 트리 도우미 — 브라우저(미리보기·편집)와 서버(생성·노션 변환)가 같이 쓴다.
  *
- * 문서: { version, title, meta: { brand, product, account, sellingPoints }, nodes: Node[] }
- * 노드: paragraph · heading · bulleted · numbered · divider · callout · table · image · step · grid · wordTable
+ * 문서: { version, title, lang?, origin?, labels?, meta: { brand, product, account, sellingPoints }, nodes: Node[] }
+ *   lang   = 'en' 이면 글이 이미 영어다(영어 브리프를 불러온 것 · 옮기기를 마친 영어본).
+ *   origin = 'import' 이면 기존 브리프를 불러온 것 — 폼 입력(Account ID)이 문서를 덮어쓰지 않는다.
+ *   labels = 모든 스텝에 똑같이 적용한 고정 문구 고침 { stepAction: '…' }.
+ * 노드: paragraph · heading · bulleted · numbered · divider · callout · table · image · step · grid · wordTable · embed
+ *   step 은 labels(소제목 고침)·heading(「Step N:」 까지 사람이 바꾼 제목 줄)·extra(오른쪽 칸 끝의 그 밖의 블록)를 가질 수 있다.
+ *   image 의 optional = 원본에 사진이 없던 자리 — 비워 두면 노션에 올리지 않는다(회색 이미지를 만들지 않는다).
  *
  * 번호·시간처럼 순서에서 나오는 값은 **저장하지 않고 그릴 때 계산한다**. 스텝을 하나 끼워 넣어도
  * `Step N`·`0:04–0:10` 이 저절로 맞고, Don'ts 가 늘어도 🔴 금지 표현 번호가 따라간다.
  */
 
-import { chromeText, nodeText } from './chrome.js';
+import { chromeText, fillVars, nodeText } from './chrome.js';
 
 export function uid() {
   return Math.random().toString(36).slice(2, 10);
@@ -20,7 +25,10 @@ export const clone = (v) => JSON.parse(JSON.stringify(v));
 export function withIds(node) {
   const n = { ...node, id: node.id || uid() };
   if (n.type === 'callout') n.children = (n.children ?? []).map(withIds);
-  if (n.type === 'step') n.image = n.image?.type === 'image' ? { ...n.image, id: n.image.id || uid() } : stepImage();
+  if (n.type === 'step') {
+    n.image = n.image?.type === 'image' ? { ...n.image, id: n.image.id || uid() } : stepImage();
+    if (n.extra) n.extra = n.extra.map(withIds);
+  }
   if (n.type === 'grid') n.images = syncGridImages(n);
   return n;
 }
@@ -29,16 +37,45 @@ export function stepImage() {
   return { type: 'image', id: uid(), slot: 'step', label: '참고 GIF', ratio: 1.78 };
 }
 
-export function gridImage(kind) {
-  return { type: 'image', id: uid(), slot: kind === 'dont' ? 'dont' : 'do', label: '예시 이미지', ratio: 0.46 };
+export function gridImage(kind, optional = false) {
+  return { type: 'image', id: uid(), slot: kind === 'dont' ? 'dont' : 'do', label: '예시 이미지', ratio: 0.46, ...(optional ? { optional: true } : {}) };
 }
 
 /** 그리드 사진 자리는 두 항목(한 줄)마다 하나. 항목 수가 바뀌면 자리 수를 맞춘다(있던 사진은 앞에서부터 유지). */
 export function syncGridImages(grid) {
   const need = Math.ceil((grid.items ?? []).length / 2);
   const have = (grid.images ?? []).map((im) => ({ ...im, id: im.id || uid() }));
-  while (have.length < need) have.push(gridImage(grid.kind));
+  while (have.length < need) have.push(gridImage(grid.kind, !!grid.optionalImages));
   return have.slice(0, need);
+}
+
+// ── 고정 문구 ───────────────────────────────────────────────────────────────
+
+/**
+ * 그릴 때 붙는 고정 문구(스텝 소제목·표 항목 이름·금지 표현 표 머리) — 사람이 고친 글이 있으면 그것
+ * (그 노드 → 문서 전체 순), 없으면 그 언어의 정해진 문구.
+ */
+export function labelText(doc, node, key, lang = 'ko', vars = {}) {
+  const own = node?.labels?.[key] ?? doc?.labels?.[key];
+  return typeof own === 'string' ? fillVars(own, vars) : chromeText(key, lang, vars);
+}
+
+/** 문서가 보여 줄 언어 — 영어 브리프를 불러온 것이면 처음부터 영어다. */
+export const docLang = (doc) => (doc?.lang === 'en' ? 'en' : 'ko');
+
+/**
+ * 「Step 3 (HOOK): 제목 ⭐」 → { hook, star, title }. 「Step N」 으로 시작하지 않으면 null.
+ * 노션 원본은 `Step 1: (HOOK) …` 처럼 (HOOK) 자리가 다르기도 해서 앞뒤 어디든 받는다.
+ */
+export function parseStepHeading(text) {
+  const s = String(text ?? '').trim().replace(/^\*\*(.*)\*\*$/s, '$1').trim();
+  const m = s.match(/^(?:step|스텝)\s*\d+\s*(\(\s*hook\s*\))?\s*[:.\-–—]?\s*(\(\s*hook\s*\))?\s*[:.\-–—]?\s*(.*)$/i);
+  if (!m) return null;
+  const rest = m[3].trim();
+  const star = rest.includes('⭐');
+  const title = rest.replace(/\s*⭐\s*/g, ' ').trim();
+  if (!title) return null;
+  return { hook: !!(m[1] || m[2]), star, title };
 }
 
 // ── 경로 ────────────────────────────────────────────────────────────────────
@@ -116,6 +153,8 @@ export const durationText = (tl, lang = 'ko') => chromeText('secs', lang, {
 });
 
 export function stepTitle(step, tl, lang = 'ko') {
+  // 사람이 「Step N:」 까지 바꿔 쓴 제목 줄은 그대로 쓴다(그 스텝은 번호가 저절로 바뀌지 않는다).
+  if (typeof step.heading === 'string' && step.heading.trim()) return step.heading;
   const star = step.star && !String(step.title).includes('⭐') ? ' ⭐' : '';
   return chromeText('stepPrefix', lang, {
     n: tl?.index ?? '?',
@@ -123,6 +162,11 @@ export function stepTitle(step, tl, lang = 'ko') {
     title: `${step.title}${star}`,
   });
 }
+
+/** 스텝 오른쪽 칸의 소제목 key — 칸 이름 → 고정 문구. */
+export const STEP_LABELS = {
+  seconds: 'stepDuration', action: 'stepAction', visual: 'stepVisual', subtitle: 'stepSubtitle', narration: 'stepNarration',
+};
 
 /** 🔴 금지 표현 제목의 번호 — Don'ts 항목 수 + 1. */
 export function wordTableNumber(doc) {
@@ -137,17 +181,29 @@ export function wordTableNumber(doc) {
   return count + 1;
 }
 
-export const wordTableTitle = (doc, lang = 'ko') => chromeText('wordTableTitle', lang, { n: wordTableNumber(doc) });
+/**
+ * 「🔴 5. …」 처럼 번호가 든 제목을 고정 문구로 남길 때, 그 번호 자리를 `{n}` 으로 바꾼다 —
+ * Don'ts 가 늘면 번호가 따라간다. 번호가 없거나 지금 번호와 다르면 글 그대로.
+ */
+export function numberTemplate(text, n) {
+  return String(text).replace(new RegExp(`^(\\D*?)${n}(?=\\s*\\.)`), '$1{n}');
+}
+
+/** 🔴 금지 표현 제목. 사람이 고친 제목은 `{n}` 자리에 번호가 들어간다. */
+export function wordTableTitle(doc, lang = 'ko', node = null) {
+  const wt = node ?? (doc.nodes ?? []).find((n) => n.type === 'wordTable');
+  return labelText(doc, wt, 'wordTableTitle', lang, { n: wordTableNumber(doc) });
+}
 
 /**
  * 표의 줄들 — 첫 칸이 고정 문구인 줄(가이드 한눈에 보기 표)은 그 언어의 항목 이름으로 바꿔 준다.
- * `rowChrome[i]` 가 그 줄 첫 칸의 고정 문구 key 다.
+ * `rowChrome[i]` 가 그 줄 첫 칸의 고정 문구 key 다. 사람이 고친 이름은 표의 `labels[key]` 에 있다.
  */
 export function tableRows(node, lang = 'ko') {
   return (node.rows ?? []).map((row, i) => {
     const keys = node.rowChrome?.[i];
     if (!keys) return row;
-    return row.map((cell, j) => (keys[j] ? chromeText(keys[j], lang) : cell));
+    return row.map((cell, j) => (keys[j] ? labelText(null, node, keys[j], lang) : cell));
   });
 }
 
@@ -167,7 +223,10 @@ export function gridRows(grid) {
 /** 고정 문구 표시. 노드가 chrome 을 들고 있으면 그 언어의 글자, 아니면 사람이 고친 글자. */
 export { nodeText };
 
-/** 문서 안의 모든 사진 자리 [{ path, node, label }] — 게시 전 회색 자리 만들기·업로드용. */
+/**
+ * 문서 안의 모든 사진 자리 [{ path, node, label }] — 게시 전 회색 자리 만들기·업로드용.
+ * `node.optional` 인 자리는 비어 있으면 노션에 올리지 않는다(원본에 사진이 없던 자리).
+ */
 export function imageSlots(doc) {
   const out = [];
   const tl = stepTimeline(doc);
@@ -175,7 +234,10 @@ export function imageSlots(doc) {
     (nodes ?? []).forEach((n, i) => {
       const p = [...base, i];
       if (n.type === 'image') out.push({ path: p, node: n, label: n.slot === 'product' ? '제품 이미지' : n.label });
-      if (n.type === 'step') out.push({ path: [...p, 'image'], node: n.image, label: `Step ${tl.steps.get(n.id)?.index ?? ''} ${n.image?.label ?? '참고 GIF'}` });
+      if (n.type === 'step') {
+        out.push({ path: [...p, 'image'], node: n.image, label: `Step ${tl.steps.get(n.id)?.index ?? ''} ${n.image?.label ?? '참고 GIF'}` });
+        walk(n.extra, [...p, 'extra']);
+      }
       if (n.type === 'grid') {
         (n.images ?? []).forEach((im, j) => out.push({
           path: [...p, 'images', j],
@@ -206,12 +268,29 @@ export function keepAssets(incoming, current) {
   return next;
 }
 
+/**
+ * 사진 자리 id → { asset, ratio } 를 빈 자리에만 채운 새 문서와 채운 수.
+ * 불러온 브리프의 사진은 글보다 늦게 도착한다 — 그사이 사람이 직접 넣은 사진은 덮지 않는다.
+ */
+export function fillAssets(doc, byId) {
+  if (!doc) return { doc, count: 0 };
+  const next = clone(doc);
+  let count = 0;
+  for (const s of imageSlots(next)) {
+    const got = byId?.[s.node?.id];
+    if (!got?.asset || s.node.asset) continue;
+    s.node.asset = got.asset;
+    if (Number(got.ratio) > 0) s.node.ratio = Number(got.ratio);
+    count += 1;
+  }
+  return { doc: count ? next : doc, count };
+}
+
 // ── 마크다운 내보내기 ───────────────────────────────────────────────────────
 
 /** 노션에 붙여넣어도 모양이 대체로 살아나는 마크다운. 노션 게시가 안 될 때의 비상구다. */
 export function docToMarkdown(doc, lang = 'ko') {
   const tl = stepTimeline(doc);
-  const L = (key, vars) => chromeText(key, lang, vars);
   const lines = [`# ${doc.title ?? ''}`, ''];
   const img = (label) => `![${label}](이미지 자리)`;
   const emit = (n, quote = '') => {
@@ -222,7 +301,9 @@ export function docToMarkdown(doc, lang = 'ko') {
       case 'bulleted': lines.push(...n.items.map((t) => q(`- ${t}`)), ''); break;
       case 'numbered': lines.push(...n.items.map((t, i) => q(`${i + 1}. ${t}`)), ''); break;
       case 'divider': lines.push('---', ''); break;
-      case 'image': lines.push(q(img(n.slot === 'product' ? '제품 이미지' : n.label)), ''); break;
+      case 'image':
+        if (n.asset || !n.optional) lines.push(q(img(n.slot === 'product' ? '제품 이미지' : n.label)), '');
+        break;
       case 'callout':
         if (n.icon) lines.push(`> ${n.icon}`);
         for (const c of n.children ?? []) emit(c, '> ');
@@ -239,27 +320,38 @@ export function docToMarkdown(doc, lang = 'ko') {
       }
       case 'step': {
         const t = tl.steps.get(n.id);
-        lines.push(`### **${stepTitle(n, t, lang)}**`, '', img(`Step ${t?.index} 참고 GIF`), '');
-        lines.push(`#### ${L('stepDuration')}`, durationText(t, lang), '');
-        lines.push(`#### ${L('stepAction')}`, ...n.action.map((a) => `- ${a}`), '');
-        lines.push(`#### ${L('stepVisual')}`, ...n.visual.map((a) => `- ${a}`), '');
-        lines.push(`#### ${L('stepSubtitle')}`, ...n.subtitle, '');
-        if (n.narration?.length) lines.push(`#### ${L('stepNarration')}`, ...n.narration, '');
+        const S = (key) => labelText(doc, n, key, lang);
+        lines.push(`### **${stepTitle(n, t, lang)}**`, '');
+        if (n.image?.asset || !n.image?.optional) lines.push(img(`Step ${t?.index} 참고 GIF`), '');
+        lines.push(`#### ${S('stepDuration')}`, durationText(t, lang), '');
+        // 빈 칸은 노션에도 안 올라간다(불러온 브리프에 원래 없던 칸).
+        if (n.action?.length) lines.push(`#### ${S('stepAction')}`, ...n.action.map((a) => `- ${a}`), '');
+        if (n.visual?.length) lines.push(`#### ${S('stepVisual')}`, ...n.visual.map((a) => `- ${a}`), '');
+        if (n.subtitle?.length) lines.push(`#### ${S('stepSubtitle')}`, ...n.subtitle, '');
+        if (n.narration?.length) lines.push(`#### ${S('stepNarration')}`, ...n.narration, '');
+        for (const c of n.extra ?? []) emit(c);
         lines.push('---', '');
         break;
       }
       case 'grid':
         gridRows(n).forEach((row, r) => {
-          for (const it of row) lines.push(q(`### ${it.n}. ${it.title}`), q(it.desc), quote ? quote.trimEnd() : '');
-          lines.push(q(img(`예시 이미지 ${r + 1}`)), quote ? quote.trimEnd() : '');
+          const im = n.images?.[r];
+          const pic = im && (im.asset || !im.optional) ? [q(img(`예시 이미지 ${r + 1}`)), quote ? quote.trimEnd() : ''] : [];
+          if (n.imagesFirst) lines.push(...pic);
+          for (const it of row) {
+            const { title, desc } = gridItemText(it, lang);
+            lines.push(q(`### ${it.n}. ${title}`), ...(desc ? [q(desc)] : []), quote ? quote.trimEnd() : '');
+          }
+          if (!n.imagesFirst) lines.push(...pic);
         });
         break;
       case 'wordTable':
-        lines.push(`### ${wordTableTitle(doc, lang)}`, n.note, '',
-          `| ${L('wordTableDont')} | ${L('wordTableInstead')} |`, '| --- | --- |');
+        lines.push(`### ${wordTableTitle(doc, lang, n)}`, n.note, '',
+          `| ${labelText(doc, n, 'wordTableDont', lang)} | ${labelText(doc, n, 'wordTableInstead', lang)} |`, '| --- | --- |');
         for (const r of n.rows) lines.push(`| ${r.dont} | ${r.instead} |`);
         lines.push('');
         break;
+      case 'embed': lines.push(q(n.url), quote ? quote.trimEnd() : ''); break;
       default: break;
     }
   };

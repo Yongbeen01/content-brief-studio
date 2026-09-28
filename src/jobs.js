@@ -6,6 +6,9 @@ import { DIRS } from './config.js';
 /**
  * 오래 걸리는 일(생성·편집·게시)을 작업으로 돌리고 화면이 1초마다 상태를 물어본다.
  * 메모리에만 있다 — 앱을 다시 켜면 진행 중이던 작업은 사라진다(초안은 따로 저장돼 있다).
+ *
+ * `progress({ data })` 로 끝나기 전의 중간 결과를 내보낼 수 있다(기존 브리프 불러오기: 글이 먼저,
+ * 사진은 받는 대로). 화면은 물을 때마다 job.data 를 본다.
  */
 
 const jobs = new Map();
@@ -20,7 +23,7 @@ export function startJob(kind, fn) {
   const controller = new AbortController();
   const job = {
     id, kind, status: 'running', phase: '', detail: '', chars: 0, done: 0, total: 0,
-    startedAt: Date.now(), endedAt: 0, result: null, error: null, controller,
+    startedAt: Date.now(), endedAt: 0, result: null, error: null, data: null, controller,
   };
   jobs.set(id, job);
   const progress = (p = {}) => {
@@ -29,6 +32,7 @@ export function startJob(kind, fn) {
     if (p.chars !== undefined) job.chars = p.chars;
     if (p.done !== undefined) job.done = p.done;
     if (p.total !== undefined) job.total = p.total;
+    if (p.data) job.data = { ...(job.data ?? {}), ...p.data };
   };
   const dir = jobDir(id);
   fs.mkdirSync(dir, { recursive: true });

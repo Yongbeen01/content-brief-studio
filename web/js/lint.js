@@ -44,7 +44,8 @@ function overviewRow(doc, name) {
 /** "40 seconds to 1 minute" · "35–45 seconds" · "30 secs" → [min, max] 초. 못 읽으면 null. */
 export function parseLengthRange(text) {
   const s = String(text ?? '').toLowerCase();
-  const UNIT = '(seconds?|secs?|minutes?|mins?|초|분)';
+  // 낱말 끝까지 봐야 한다 — 「1920 minimum」 의 min 을 분으로 읽으면 115200초가 된다.
+  const UNIT = '(seconds?|secs?|minutes?|mins?|초|분)(?![a-z])';
   const mult = (u) => (/^min|^분/.test(u) ? 60 : 1);
   const vals = [];
   // 단위가 붙은 숫자만 길이로 본다 — 해상도(1080x1920)·비율(9:16) 숫자는 빠진다.
@@ -88,7 +89,7 @@ export function lintDoc(doc, { plain = (t) => String(t ?? '') } = {}) {
     warn(`스텝 시간 합계 ${total}초가 Video Type 길이(${range[0]}~${range[1]}초)와 맞지 않습니다`);
   }
 
-  const empty = imageSlots(doc).filter((s) => !s.node?.asset).length;
+  const empty = imageSlots(doc).filter((s) => !s.node?.asset && !s.node?.optional).length;
   if (empty) info(`사진 자리 ${empty}곳이 회색 네모로 남아 있습니다 — 노션에서도 회색 이미지로 올라가 나중에 바꿀 수 있습니다`);
   return out;
 }

@@ -3,9 +3,9 @@ import { config } from '../config.js';
 import { runClaude, ClaudeError } from '../claude/cli.js';
 import { extractJsonObject } from '../claude/json.js';
 import { EDIT, INSERT, fixEscapes, validate } from './schema.js';
-import { editSystem, editUser, insertUser } from './prompts.js';
+import { ENGLISH_DOC_NOTE, editSystem, editUser, insertUser } from './prompts.js';
 import {
-  docToMarkdown, getAt, insertAt, setAt, stepTimeline, stepTitle, withIds, wordTableTitle,
+  docLang, docToMarkdown, getAt, insertAt, setAt, stepTimeline, stepTitle, withIds, wordTableTitle,
 } from '../../web/js/doc.js';
 
 /**
@@ -27,9 +27,10 @@ function nodeLabel(doc, node) {
     case 'callout': return `${node.icon || ''} 박스 (${node.role ?? node.color})`;
     case 'table': return node.role === 'overview' ? 'Guideline Overview 표' : '표';
     case 'grid': return node.kind === 'dont' ? "Don'ts 항목들" : "Do's 항목들";
-    case 'wordTable': return wordTableTitle(doc);
+    case 'wordTable': return wordTableTitle(doc, 'ko', node);
     case 'bulleted': return '불릿 목록';
     case 'numbered': return '번호 목록';
+    case 'embed': return '링크(임베드)';
     default: return node.type;
   }
 }
@@ -67,6 +68,8 @@ const stripChrome = ({ chrome, vars, ...rest }) => rest;
  */
 export function resolveTarget(doc, p) {
   if (!Array.isArray(p) || p[0] !== 'nodes') throw new Error('고칠 위치가 올바르지 않습니다.');
+  // 소제목(고정 문구)은 직접 고치기만 — web/js/direct.js 와 짝.
+  if (p[p.length - 2] === 'labels') throw new Error('소제목은 [직접 고치기]로 고쳐 주세요.');
   const value = getAt(doc, p);
   if (value === undefined) throw new Error('고칠 위치를 문서에서 찾지 못했습니다 — 화면을 새로고침해 주세요.');
   const parent = getAt(doc, p.slice(0, -1));
@@ -120,19 +123,29 @@ export function resolveTarget(doc, p) {
         apply: (d, v) => setAt(d, p, { ...value, children: v.children.map(withIds) }),
       };
     case 'step': {
-      const { id, type, image, ...fields } = value;
+      // 소제목 고침·제목 줄·오른쪽 칸의 그 밖의 블록은 Claude 에게 보내지 않고 그대로 둔다.
+      const {
+        id, type, image, labels, extra, heading, ...fields
+      } = value;
       return {
         kind: 'step',
         current: fields,
         where,
         hint: 'Title without the "Step N:" prefix. Keep hook as it is.',
-        apply: (d, v) => setAt(d, p, { ...value, ...v, hook: value.hook }),
+        apply: (d, v) => {
+          const next = { ...value, ...v, hook: value.hook };
+          // 사람이 바꿔 둔 제목 줄은 Claude 가 제목을 바꿨으면 버린다(새 제목이 보여야 한다).
+          if (heading && v.title !== value.title) delete next.heading;
+          return setAt(d, p, next);
+        },
       };
     }
     case 'wordTable':
       return { kind: 'wordTable', current: { note: value.note, rows: value.rows }, where, apply: (d, v) => setAt(d, p, { ...value, note: v.note, rows: v.rows }) };
     case 'image':
       throw new Error('사진 자리는 눌러서 파일로 바꿉니다.');
+    case 'embed':
+      throw new Error('링크는 [직접 고치기]로 고쳐 주세요.');
     case 'divider':
       throw new Error('구분선은 고칠 내용이 없습니다. 지우려면 [삭제]를 누르세요.');
     default:
@@ -192,13 +205,16 @@ async function ask({ system, prompt, schema, jobDir, signal, run, preferKeys }) 
   throw new ClaudeError('bad_output', 'Claude 답의 모양이 맞지 않아 반영하지 못했습니다. 지시를 조금 바꿔 다시 시도해 주세요.');
 }
 
+/** 영어 브리프를 불러온 문서면 영어로 쓰라는 말을 붙인다. */
+const langHint = (doc, hint = '') => [hint, docLang(doc) === 'en' ? ENGLISH_DOC_NOTE : ''].filter(Boolean).join('\n');
+
 export async function runEdit({ doc, path: p, instruction, sourceNotes, jobDir, signal, run = runClaude }) {
   if (!String(instruction ?? '').trim()) throw new Error('어떻게 고칠지 적어 주세요.');
   const t = resolveTarget(doc, p);
   const value = await ask({
     system: editSystem(),
     prompt: editUser({
-      docMarkdown: docToMarkdown(doc), sourceNotes, where: t.where, kind: t.kind, current: t.current, instruction, hint: t.hint,
+      docMarkdown: docToMarkdown(doc, docLang(doc)), sourceNotes, where: t.where, kind: t.kind, current: t.current, instruction, hint: langHint(doc, t.hint),
     }),
     schema: EDIT[t.kind],
     jobDir,
@@ -214,7 +230,9 @@ export async function runInsert({ doc, containerPath, index, instruction, source
   const t = resolveInsert(doc, containerPath, index);
   const value = await ask({
     system: editSystem(),
-    prompt: insertUser({ docMarkdown: docToMarkdown(doc), sourceNotes, where: t.where, kind: t.kind, allowed: t.allowed, instruction }),
+    prompt: insertUser({
+      docMarkdown: docToMarkdown(doc, docLang(doc)), sourceNotes, where: t.where, kind: t.kind, allowed: t.allowed, instruction, hint: langHint(doc),
+    }),
     schema: INSERT[t.kind],
     jobDir,
     signal,

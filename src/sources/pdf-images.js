@@ -151,13 +151,12 @@ function readImageObj(s, buf, m, lengths) {
 }
 
 /**
- * @param {Buffer} buf
- * @param {{ max?: number, minBytes?: number }} [opts]
- * @returns {{ images: {data: Buffer, mime: string, width: number, height: number}[], note: string }}
+ * PDF 안의 사진 객체 전부(번호 → 사전·데이터)와, 다른 사진의 투명도로만 쓰이는 객체 번호.
+ * @returns {{ objs: Map<string, {head:string, data:Buffer}>, masks: Set<string>, encrypted: boolean }}
  */
-export function extractPdfImages(buf, { max = 60, minBytes = 3000 } = {}) {
+export function pdfImageTable(buf) {
   const s = buf.toString('latin1');
-  if (/\/Encrypt\s+\d+\s+\d+\s+R/.test(s)) return { images: [], note: '암호가 걸린 PDF 라 사진은 꺼내지 못했습니다' };
+  if (/\/Encrypt\s+\d+\s+\d+\s+R/.test(s)) return { objs: new Map(), masks: new Set(), encrypted: true };
 
   // /Length 가 다른 객체를 가리키는 경우가 있다 — 숫자만 든 객체를 미리 모아 둔다.
   const lengths = new Map();
@@ -172,27 +171,42 @@ export function extractPdfImages(buf, { max = 60, minBytes = 3000 } = {}) {
   // 다른 사진의 투명도·오려내기로 쓰이는 객체는 그 자체로는 사진이 아니다.
   const masks = new Set();
   for (const m of s.matchAll(/\/(?:SMask|Mask)\s+(\d+)\s+\d+\s+R/g)) masks.add(m[1]);
+  return { objs, masks, encrypted: false };
+}
 
+/** 사진 객체 하나 → { data, mime, width, height } (JPEG 그대로 / PNG 로 다시 포장). 못 꺼내면 null. */
+export function decodePdfImage(table, num) {
+  const o = table.objs.get(String(num));
+  if (!o || table.masks.has(String(num)) || /\/ImageMask\s+true/.test(o.head)) return null;
+  const filter = (o.head.match(/\/Filter\s*(\/[A-Za-z0-9]+|\[[^\]]*\])/) ?? [])[1] ?? '';
+  if (/ASCII85|ASCIIHex|LZW|JPX|JBIG2|CCITT|RunLength/.test(filter)) return null;
+  const width = Number((o.head.match(/\/Width\s+(\d+)/) ?? [])[1]);
+  const height = Number((o.head.match(/\/Height\s+(\d+)/) ?? [])[1]);
+  if (/DCTDecode/.test(filter)) {
+    const meta = imageMeta(o.data); // JPEG 으로 실제 읽히는지 확인한다
+    return meta ? { data: Buffer.from(o.data), ...meta } : null;
+  }
+  if (/FlateDecode/.test(filter)) {
+    const png = flateToPng(o.data, o.head, width, height, table.objs);
+    return png ? { data: png, mime: 'image/png', width, height } : null;
+  }
+  return null;
+}
+
+/**
+ * @param {Buffer} buf
+ * @param {{ max?: number, minBytes?: number }} [opts]
+ * @returns {{ images: {data: Buffer, mime: string, width: number, height: number}[], note: string }}
+ */
+export function extractPdfImages(buf, { max = 60, minBytes = 3000 } = {}) {
+  const table = pdfImageTable(buf);
+  if (table.encrypted) return { images: [], note: '암호가 걸린 PDF 라 사진은 꺼내지 못했습니다' };
   const images = [];
-  for (const [num, o] of objs) {
+  for (const [num, o] of table.objs) {
     if (images.length >= max) break;
-    if (masks.has(num) || /\/ImageMask\s+true/.test(o.head)) continue;
     if (o.data.length < minBytes) continue;
-
-    const filter = (o.head.match(/\/Filter\s*(\/[A-Za-z0-9]+|\[[^\]]*\])/) ?? [])[1] ?? '';
-    if (/ASCII85|ASCIIHex|LZW|JPX|JBIG2|CCITT|RunLength/.test(filter)) continue;
-    const width = Number((o.head.match(/\/Width\s+(\d+)/) ?? [])[1]);
-    const height = Number((o.head.match(/\/Height\s+(\d+)/) ?? [])[1]);
-
-    if (/DCTDecode/.test(filter)) {
-      const meta = imageMeta(o.data); // JPEG 으로 실제 읽히는지 확인한다
-      if (meta) images.push({ data: Buffer.from(o.data), ...meta });
-      continue;
-    }
-    if (/FlateDecode/.test(filter)) {
-      const png = flateToPng(o.data, o.head, width, height, objs);
-      if (png) images.push({ data: png, mime: 'image/png', width, height });
-    }
+    const im = decodePdfImage(table, num);
+    if (im) images.push(im);
   }
   return { images, note: '' };
 }

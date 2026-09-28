@@ -203,7 +203,8 @@ test('영어로 옮기기: 줄 수가 안 맞으면 한 번 더 묻는다', asyn
     },
   });
   assert.ok(calls.length >= 2, `${calls.length}번 불렀다`);
-  assert.match(calls[1], /return exactly/i);
+  // 묶음은 동시에 보내므로 다시 묻는 호출이 몇 번째인지는 정해져 있지 않다
+  assert.ok(calls.some((p) => /return exactly/i.test(p)));
   assert.equal(en.lang, 'en');
   assert.match(en.nodes.filter((n) => n.type === 'step')[0].title, /^t\d+$/);
   assert.match(en.nodes.find((n) => n.role === 'overview').rows[3][1], /^t\d+$/); // Caption 도 바뀌었다
@@ -253,12 +254,13 @@ test('직접 고치기 — 글자만 있는 자리는 Claude 없이 바로 바�
   assert.equal(getAt(secs.apply(doc, ['99']), ['nodes', si, 'seconds']), 30);
   assert.equal(getAt(secs.apply(doc, ['7']), ['nodes', si, 'seconds']), 7);
 
-  // 표 한 줄 — 항목 이름 칸(고정 문구)은 건드리지 않는다
+  // 표 한 줄 — 항목 이름 칸(고정 문구)도 나온다. 그대로 두면 정해진 이름 그대로(고침 없음).
   const ov = doc.nodes.findIndex((n) => n.role === 'overview');
   const row = directTarget(doc, ['nodes', ov, 'rows', 3]);
-  assert.equal(row.fields.length, 1);
-  assert.equal(row.fields[0].label, chromeText('ovCaption', 'ko'));
-  assert.deepEqual(getAt(row.apply(doc, ['새 캡션']), ['nodes', ov, 'rows', 3]), ['Caption', '새 캡션']);
+  assert.deepEqual(row.fields.map((f) => f.label), ['항목 이름', chromeText('ovCaption', 'ko')]);
+  const recapped = row.apply(doc, [chromeText('ovCaption', 'ko'), '새 캡션']);
+  assert.deepEqual(getAt(recapped, ['nodes', ov, 'rows', 3]), ['Caption', '새 캡션']);
+  assert.equal(getAt(recapped, ['nodes', ov]).labels, undefined);
 
   // Don't 항목 — 코드가 채운 표준 문구도 고칠 수 있다
   const dont = doc.nodes.findIndex((n) => n.role === 'donts');
@@ -271,14 +273,17 @@ test('직접 고치기 — 글자만 있는 자리는 Claude 없이 바로 바�
   // 금지 표현 표는 「쓰지 말 것 | 대신 쓸 말」 한 줄씩
   const wt = doc.nodes.findIndex((n) => n.type === 'wordTable');
   const words = directTarget(doc, ['nodes', wt]);
-  assert.match(words.fields[1].value, /treats dullness \| helps the look of dullness/);
-  assert.deepEqual(getAt(words.apply(doc, ['설명', 'cures acne | helps with blemishes\n | 버릴 줄']), ['nodes', wt]).rows,
-    [{ dont: 'cures acne', instead: 'helps with blemishes' }]);
+  assert.deepEqual(words.fields.map((f) => f.key), ['title', 'note', 'rows', 'dontHead', 'insteadHead']);
+  assert.match(words.fields[2].value, /treats dullness \| helps the look of dullness/);
+  const same = words.fields.map((f) => f.value);
+  const wordsAfter = getAt(words.apply(doc, [same[0], '설명', 'cures acne | helps with blemishes\n | 버릴 줄', same[3], same[4]]), ['nodes', wt]);
+  assert.deepEqual(wordsAfter.rows, [{ dont: 'cures acne', instead: 'helps with blemishes' }]);
+  assert.equal(wordsAfter.labels, undefined); // 제목·머리는 그대로 — 고침 없음
 
-  // 여러 조각이 얽힌 자리는 프롬프트로만 고친다
-  assert.equal(directTarget(doc, ['nodes', si]), null); // 스텝 전체
+  // 여러 조각이 얽힌 자리는 프롬프트로만 고친다 — 스텝·표는 직접 고치기가 제목 줄·머리줄만 맡는다
+  assert.equal(directTarget(doc, ['nodes', si]).where, '스텝 제목 줄');
   assert.equal(directTarget(doc, ['nodes', 0]), null); // 박스
-  assert.equal(directTarget(doc, ['nodes', ov]), null); // 표 전체
+  assert.equal(directTarget(doc, ['nodes', ov]).where, '표의 머리줄');
   assert.equal(directTarget(doc, ['nodes', 3]), null); // 사진 자리
   assert.equal(directTarget(doc, ['nodes', 99]), null); // 없는 자리
 });
@@ -344,7 +349,7 @@ test('생성 — 입력 검사, 소구점 누락이면 한 번 더 묻는다, �
   const prompts = [];
   const answers = [first, sample];
   const res = await generateBrief({
-    inputs, sourceIds: [], jobDir: tmp(),
+    inputs, sourceIds: [], jobDir: tmp(), pretranslate: false,
     run: async (o) => { prompts.push(o.prompt); return { structured: answers.shift(), text: '' }; },
     lookupPartnership: async (brand) => findPartnershipPage([{ id: 'abc', title: `[${brand}] Instagram Partnership Ads Guideline` }], brand),
   });
@@ -360,7 +365,7 @@ test('생성 — 입력 검사, 소구점 누락이면 한 번 더 묻는다, �
 
   // 답 안의 역슬래시+n 두 글자는 진짜 줄바꿈으로 (실측: Caption 에 \n 이 글자로 찍혔다)
   const escaped = await generateBrief({
-    inputs, sourceIds: [], jobDir: tmp(),
+    inputs, sourceIds: [], jobDir: tmp(), pretranslate: false,
     run: async () => ({ structured: { ...sample, caption: 'line one\\nline two', music: 'a\\nb' }, text: '' }),
   });
   const ov = escaped.doc.nodes.find((n) => n.role === 'overview');
@@ -369,4 +374,176 @@ test('생성 — 입력 검사, 소구점 누락이면 한 번 더 묻는다, �
 
   assert.equal(findPartnershipPage([{ id: '1', title: '[CLERIVY] Instagram Partnership Ads Guideline' }], 'Clerivy'), 'https://www.notion.so/1');
   assert.equal(findPartnershipPage([{ id: '1', title: '[FEEV] Instagram Partnership Ads Guideline' }], 'Clerivy'), '');
+});
+
+// ── 고정 문구 고치기 · 영어본 캐시 ────────────────────────────────────────────
+
+const { labelText, fillAssets, setAt } = await import('../web/js/doc.js');
+const { applyStepHeading, applyStepLabel } = await import('../web/js/direct.js');
+const { cacheKey, translateFromCache } = await import('../web/js/translatable.js');
+const { TRANSLATE } = await import('../src/brief/schema.js');
+
+test('고정 문구 — 스텝 제목 줄: 번호는 자동, (HOOK)·⭐ 는 쓴 대로, 「Step N」 을 지우면 그 줄 그대로', () => {
+  const doc = build();
+  const si = doc.nodes.findIndex((n) => n.type === 'step');
+  const p = ['nodes', si + 1];
+  const form = directTarget(doc, p);
+  assert.equal(form.fields[0].value, 'Step 2: 텍스처 클로즈업 ⭐');
+  const tl = (d) => stepTimeline(d).steps.get(getAt(d, p).id);
+
+  // 번호를 틀리게 써도 자동 번호, HOOK 붙이기·⭐ 떼기
+  const a = form.apply(doc, ['Step 9 (HOOK): 제형 클로즈업']);
+  assert.deepEqual([getAt(a, p).title, getAt(a, p).hook, getAt(a, p).star, getAt(a, p).heading], ['제형 클로즈업', true, false, undefined]);
+  assert.equal(stepTitle(getAt(a, p), tl(a)), 'Step 2 (HOOK): 제형 클로즈업');
+  // 「Step N」 을 지우면 사람이 쓴 줄 그대로 — 영어로 옮길 때도 그 줄을 보낸다
+  const b = form.apply(doc, ['인트로 컷: 제형']);
+  assert.equal(stepTitle(getAt(b, p), tl(b)), '인트로 컷: 제형');
+  assert.ok(collectTranslatable(b).some((i) => i.kind === 'step heading' && i.text === '인트로 컷: 제형'));
+  // 다시 「Step N:」 으로 쓰면 자동 번호로 돌아온다
+  assert.equal(applyStepHeading(getAt(b, p), 'Step 1: 돌아옴').heading, undefined);
+});
+
+test('고정 문구 — 스텝 소제목: 모든 스텝에 똑같이 / 이 스텝만 / 원래 글로 되돌리기', () => {
+  const doc = build();
+  const stepIdx = doc.nodes.map((n, i) => (n.type === 'step' ? i : -1)).filter((i) => i >= 0);
+  const [i0, i1] = stepIdx;
+  const lp = ['nodes', i1, 'labels', 'stepAction'];
+  const form = directTarget(doc, lp);
+  assert.deepEqual(form.fields.map((f) => [f.key, f.kind, f.value]), [['text', 'text', chromeText('stepAction', 'ko')], ['all', 'check', '1']]);
+  assert.equal(form.aiOff, true);
+  assert.throws(() => resolveTarget(doc, lp), /직접 고치기/);
+
+  const all = form.apply(doc, ['🎬 동작', '1']);
+  assert.equal(all.labels.stepAction, '🎬 동작');
+  assert.ok(all.nodes.filter((n) => n.type === 'step').every((s) => labelText(all, s, 'stepAction') === '🎬 동작'));
+  // 문서 전체 고침은 나중에 더한 스텝에도 적용된다
+  const more = insertAt(all, ['nodes'], i1, [{ type: 'step', title: 'x', seconds: 3, action: ['a'], visual: ['v'], subtitle: ['s'], narration: [] }]);
+  assert.equal(labelText(more, more.nodes[i1], 'stepAction'), '🎬 동작');
+
+  // 이 스텝만 — 다른 스텝은 문서 전체 고침을 따른다
+  const one = applyStepLabel(all, ['nodes', i0], 'stepAction', '🎬 첫 동작', false);
+  assert.equal(labelText(one, one.nodes[i0], 'stepAction'), '🎬 첫 동작');
+  assert.equal(labelText(one, one.nodes[i1], 'stepAction'), '🎬 동작');
+  // 모든 스텝에 똑같이 하면 스텝별 고침은 지워진다. 정해진 글로 되돌리면 고침 자체가 없어진다.
+  const reset = applyStepLabel(one, ['nodes', i1], 'stepAction', chromeText('stepAction', 'ko'), true);
+  assert.equal(reset.labels, undefined);
+  assert.equal(reset.nodes[i0].labels, undefined);
+  // 고친 소제목은 영어로 옮길 줄이 된다(정해진 것은 아니다)
+  assert.ok(collectTranslatable(all).some((i) => i.kind === 'label' && i.text === '🎬 동작'));
+  assert.ok(!collectTranslatable(doc).some((i) => i.kind === 'label'));
+  assert.match(docToMarkdown(all), /#### 🎬 동작/);
+});
+
+test('고정 문구 — 표 항목 이름·머리줄, 금지 표현 표 제목(번호는 계속 따라감)', () => {
+  const doc = build();
+  const ov = doc.nodes.findIndex((n) => n.role === 'overview');
+  const row = directTarget(doc, ['nodes', ov, 'rows', 3]);
+  const renamed = row.apply(doc, ['필수 캡션', '새 캡션']);
+  const table = getAt(renamed, ['nodes', ov]);
+  assert.deepEqual([table.labels, table.rows[3]], [{ ovCaption: '필수 캡션' }, ['Caption', '새 캡션']]);
+  assert.equal(tableRows(table, 'ko')[3][0], '필수 캡션');
+  assert.equal(table.rowChrome[3][0], 'ovCaption'); // 줄의 정체는 그대로 — 영어로 옮길 문체·검사가 안 깨진다
+  assert.ok(collectTranslatable(renamed).some((i) => i.path.join('.') === `nodes.${ov}.labels.ovCaption`));
+
+  const head = directTarget(doc, ['nodes', ov]);
+  assert.deepEqual(head.fields.map((f) => f.value), [chromeText('ovItem', 'ko'), chromeText('ovContent', 'ko')]);
+  const h = head.apply(doc, ['구분', chromeText('ovContent', 'ko')]);
+  assert.deepEqual(getAt(h, ['nodes', ov]).labels, { ovItem: '구분' });
+
+  const wt = doc.nodes.findIndex((n) => n.type === 'wordTable');
+  const words = directTarget(doc, ['nodes', wt]);
+  const v = words.fields.map((f) => f.value);
+  const titled = words.apply(doc, ['🔴 5. 이 말은 하지 마세요', v[1], v[2], v[3], '✅ 이렇게']);
+  const node = getAt(titled, ['nodes', wt]);
+  assert.deepEqual(node.labels, { wordTableTitle: '🔴 {n}. 이 말은 하지 마세요', wordTableInstead: '✅ 이렇게' });
+  assert.equal(wordTableTitle(titled, 'ko', node), '🔴 5. 이 말은 하지 마세요');
+  // Don'ts 가 하나 늘면 번호가 따라간다
+  const dontsGrid = ['nodes', titled.nodes.findIndex((n) => n.role === 'donts'), 'children', 1, 'items'];
+  const moreDonts = insertAt(titled, dontsGrid, 0, [{ title: 'DO NOT x', desc: 'y' }]);
+  assert.equal(wordTableTitle(moreDonts, 'ko', getAt(moreDonts, ['nodes', wt])), '🔴 6. 이 말은 하지 마세요');
+});
+
+test('영어본 캐시 — 옮겨 둔 줄로 바로 만들고, 바뀐 줄만 Claude 에게 보낸다', async () => {
+  const doc = build();
+  const items = collectTranslatable(doc);
+  const cache = Object.fromEntries(items.map((it, i) => [cacheKey(it), `EN${i}`]));
+  const en = translateFromCache(doc, cache);
+  assert.equal(en.lang, 'en');
+  assert.equal(en.nodes.find((n) => n.type === 'step').title, `EN${items.findIndex((i) => i.kind === 'step title')}`);
+
+  // 한 줄 고치면 캐시로는 모자란다 → 그 한 줄만 보낸다
+  const si = doc.nodes.findIndex((n) => n.type === 'step');
+  const edited = setAt(doc, ['nodes', si, 'title'], '새 제목');
+  assert.equal(translateFromCache(edited, cache), null);
+  const asked = [];
+  const out = await translateDoc({
+    doc: edited,
+    jobDir: tmp(),
+    cache,
+    run: async (o) => {
+      const lines = o.prompt.match(/^\d+ \[.*$/gm);
+      asked.push(lines);
+      return { structured: { texts: lines.map(() => 'New Title') }, text: '' };
+    },
+  });
+  assert.equal(asked.length, 1);
+  assert.deepEqual(asked[0], ['1 [step title] 새 제목']);
+  assert.equal(out.nodes[si].title, 'New Title');
+  assert.equal(cache[cacheKey({ kind: 'step title', text: '새 제목' })], 'New Title'); // 캐시에 더해진다
+  // 모두 캐시에 있으면 Claude 를 부르지 않는다
+  await translateDoc({ doc: edited, jobDir: tmp(), cache, run: async () => assert.fail('부르면 안 된다') });
+
+  // 묶음이 여럿이면 동시에 보낸다
+  let inFlight = 0;
+  let peak = 0;
+  const big = { ...doc, nodes: [...doc.nodes, { type: 'bulleted', id: 'many', items: Array.from({ length: 100 }, (_, i) => `줄 ${i}`) }] };
+  await translateDoc({
+    doc: big,
+    jobDir: tmp(),
+    run: async (o) => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise((r) => { setTimeout(r, 20); });
+      inFlight -= 1;
+      return { structured: { texts: o.prompt.match(/^\d+ \[/gm).map(() => 'x') }, text: '' };
+    },
+  });
+  assert.ok(peak >= 2, `동시에 ${peak}개`);
+});
+
+test('생성하면 영어본까지 만들어 둔다 — 실패해도 기획서는 나온다', async () => {
+  const phases = [];
+  const answer = (o) => (o.schema === TRANSLATE
+    ? { structured: { texts: o.prompt.match(/^\d+ \[/gm).map((_, i) => `EN ${i}`) }, text: '' }
+    : { structured: sample, text: '' });
+  const res = await generateBrief({
+    inputs, sourceIds: [], jobDir: tmp(), run: async (o) => answer(o), onProgress: (p) => phases.push(p.phase),
+  });
+  assert.equal(res.docEn.lang, 'en');
+  assert.equal(res.docEn.nodes.length, res.doc.nodes.length);
+  assert.equal(Object.keys(res.enCache).length, new Set(collectTranslatable(res.doc).map(cacheKey)).size);
+  assert.equal(phases[phases.length - 1], 'translate');
+  // 캐시만으로 같은 영어본을 다시 만들 수 있다(화면이 이걸로 바로 보여 준다)
+  assert.deepEqual(translateFromCache(res.doc, res.enCache).nodes, res.docEn.nodes);
+
+  const failed = await generateBrief({
+    inputs, sourceIds: [], jobDir: tmp(),
+    run: async (o) => (o.schema === TRANSLATE ? { structured: { texts: [] }, text: '' } : { structured: sample, text: '' }),
+  });
+  assert.equal(failed.docEn, null);
+  assert.ok(failed.doc.nodes.length > 10);
+  assert.ok(failed.infos.some((t) => /영어본을 미리 만들지 못했습니다/.test(t)));
+});
+
+test('뒤늦게 온 사진은 빈 자리에만 — 사람이 넣은 사진은 덮지 않는다', () => {
+  const doc = build();
+  const slots = imageSlots(doc);
+  const mine = setAt(doc, slots[1].path, { ...slots[1].node, asset: { id: 'mine' } });
+  const { doc: filled, count } = fillAssets(mine, {
+    [slots[0].node.id]: { asset: { id: 'a0' }, ratio: 1.25 },
+    [slots[1].node.id]: { asset: { id: 'a1' } },
+  });
+  assert.equal(count, 1);
+  assert.deepEqual([getAt(filled, slots[0].path).asset.id, getAt(filled, slots[0].path).ratio], ['a0', 1.25]);
+  assert.equal(getAt(filled, slots[1].path).asset.id, 'mine');
 });

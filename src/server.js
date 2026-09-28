@@ -17,7 +17,10 @@ import { makeClipAsset, makePreviews } from './video/clip.js';
 import { toolsStatus } from './media/tools.js';
 import { runEdit, runInsert } from './brief/edit.js';
 import { translateDoc } from './brief/translate.js';
-import { docToMarkdown } from '../web/js/doc.js';
+import { importBrief } from './brief/import.js';
+import { transcribePdf } from './brief/import-pdf.js';
+import { readApiBrief, readNotionBrief } from './sources/notion-blocks.js';
+import { isNotionUrl } from './sources/notion-public.js';
 import { publishDoc } from './notion/publish.js';
 import { notionClient } from './notion/index.js';
 import * as oauth from './notion/oauth.js';
@@ -329,16 +332,50 @@ async function handleApi(req, res, url) {
     });
     return json(res, 200, { jobId: job.id });
   }
+  // 영어본 — 화면이 보낸 캐시(이미 옮긴 줄)에 없는 줄만 Claude 에게 보낸다. 늘어난 캐시를 돌려준다.
   if (m === 'POST' && p === '/api/translate') {
     const body = await readJson(req, 16 * 1024 * 1024);
+    const cache = { ...(body.enCache ?? {}) };
     const job = startJob('translate', ({ progress, signal, dir }) => translateDoc({
-      doc: body.doc, docMarkdown: docToMarkdown(body.doc, 'ko'), jobDir: dir, onProgress: progress, signal,
-    }).then((docEn) => ({ docEn })));
+      doc: body.doc, jobDir: dir, onProgress: progress, signal, cache,
+    }).then((docEn) => ({ docEn, enCache: cache })));
+    return json(res, 200, { jobId: job.id });
+  }
+  // 기존 브리프 불러오기 — 노션 링크(Claude 없이) 또는 노션에서 내보낸 PDF(Claude 가 옮겨 적음).
+  // 글을 먼저 job.data 로 내보내고, 사진은 받는 대로 job.data.assets 에 더한다.
+  if (m === 'POST' && p === '/api/import') {
+    const body = await readJson(req);
+    let read;
+    let readLabel;
+    if (body.url) {
+      const url = String(body.url).trim();
+      if (!isNotionUrl(url)) return json(res, 400, { error: '노션 링크가 아닙니다.' });
+      const viaApi = oauth.status().connected ? (pageId) => readApiBrief(notionClient(), pageId) : null;
+      read = () => readNotionBrief(url, { viaApi });
+      readLabel = '노션 페이지 읽는 중';
+    } else {
+      const src = sources.getSource(body.sourceId);
+      if (!src || src.kind !== 'pdf') return json(res, 400, { error: '노션에서 내보낸 PDF 를 올려 주세요.' });
+      if (src.status !== 'ready') return json(res, 400, { error: src.status === 'reading' ? 'PDF 를 아직 읽는 중입니다.' : (src.error || 'PDF 를 읽지 못했습니다.') });
+      readLabel = 'Claude 가 PDF 를 옮겨 적는 중 (2~3분)';
+      read = null; // 작업 폴더가 있어야 해서 아래에서 만든다
+    }
+    const job = startJob('import', ({ progress, signal, dir }) => importBrief({
+      read: read ?? (() => transcribePdf({ file: sources.getSourceFile(body.sourceId), jobDir: dir, signal, onProgress: progress })),
+      saveImage: (img) => {
+        const meta = store.saveAsset(img);
+        return { id: meta.id, name: meta.name, mime: meta.mime, size: meta.size };
+      },
+      onProgress: progress,
+      signal,
+      readLabel,
+    }));
     return json(res, 200, { jobId: job.id });
   }
   if (m === 'POST' && p === '/api/publish') {
     const body = await readJson(req, 16 * 1024 * 1024);
     if (!oauth.status().connected) return json(res, 400, { error: '노션이 연결되어 있지 않습니다.' });
+    const cache = { ...(body.enCache ?? {}) };
     const job = startJob('publish', ({ progress, signal, dir }) => publishDoc({
       doc: body.doc,
       client: notionClient(),
@@ -346,9 +383,9 @@ async function handleApi(req, res, url) {
       placeholders: body.placeholders ?? {},
       parentPageId: config.notion.parentPageId,
       onProgress: progress,
-      // 한국어 초안이면 올리기 직전에 영어로 옮긴다. 화면이 이미 옮겨 둔 영어본을 보냈으면 그대로 쓴다.
-      translate: (doc) => translateDoc({ doc, docMarkdown: docToMarkdown(doc, 'ko'), jobDir: dir, onProgress: progress, signal }),
-    }));
+      // 한국어 초안이면 올리기 직전에 영어로 옮긴다(옮겨 둔 줄은 캐시에서). 화면이 영어본을 보냈으면 그대로 쓴다.
+      translate: (doc) => translateDoc({ doc, jobDir: dir, onProgress: progress, signal, cache }),
+    }).then((r) => ({ ...r, enCache: cache })));
     return json(res, 200, { jobId: job.id });
   }
   if (m === 'POST' && /^\/api\/jobs\/[^/]+\/cancel$/.test(p)) return json(res, 200, { ok: cancelJob(p.split('/')[3]) });

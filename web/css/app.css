@@ -455,22 +455,30 @@ details.card[open] > summary .fx-chevron { transform: rotate(180deg); }
 .edit-pop-actions .primary-btn { width: auto; flex: 1 1 auto; }
 .edit-pop-hint { font-size: 0.78rem; color: var(--fx-text-weaker); }
 
-/* 직접 고치기 ↔ Claude 에게 시키기 */
-.edit-tabs { display: flex; gap: 4px; background: var(--fx-fill); border-radius: var(--fx-r-sm); padding: 3px; }
-.edit-tab {
+/* 직접 고치기 ↔ Claude 에게 시키기 · 새로 생성 ↔ 기존 브리프 업로드 (같은 모양의 두 칸짜리 탭) */
+.edit-tabs, .mode-tabs { display: flex; gap: 4px; background: var(--fx-fill); border-radius: var(--fx-r-sm); padding: 3px; }
+.edit-tab, .mode-tab {
   flex: 1 1 0; min-width: 0;
   border: 0; background: none; cursor: pointer;
   font: inherit; font-size: 0.85rem; color: var(--fx-text-weak);
   border-radius: 6px; padding: 5px 8px;
 }
-.edit-tab:hover:not(:disabled) { color: var(--fx-text); }
-.edit-tab.is-on { background: var(--fx-card); color: var(--fx-text); font-weight: 600; }
-.edit-tab:disabled { opacity: 0.45; cursor: not-allowed; }
+.edit-tab:hover:not(:disabled), .mode-tab:hover:not(:disabled) { color: var(--fx-text); }
+.edit-tab.is-on, .mode-tab.is-on { background: var(--fx-card); color: var(--fx-text); font-weight: 600; }
+.edit-tab:disabled, .mode-tab:disabled { opacity: 0.45; cursor: not-allowed; }
+.mode-tabs { margin-bottom: 18px; }
+.form-hint.import-note { margin: 8px 0 0; }
+.mode-tab { font-size: 0.93rem; padding: 7px 10px; }
+/* 기존 브리프 업로드일 때 이름은 비워도 된다(불러오면 원래 제목이 들어간다) */
+#form_section.is-import .fx-required-label[data-req="briefName"]::after { content: ''; }
 .edit-fields { display: flex; flex-direction: column; gap: 8px; max-height: 46vh; overflow-y: auto; }
 .edit-field { display: flex; flex-direction: column; gap: 3px; }
 .edit-field > label { font-size: 0.8rem; font-weight: 600; color: var(--fx-text-weak); }
 .edit-field textarea { min-height: 54px; }
 .edit-field-hint { font-size: 0.75rem; color: var(--fx-text-weaker); }
+.edit-field.is-check { flex-direction: row; align-items: center; gap: 6px; }
+.edit-field.is-check > label { margin: 0; color: var(--fx-text); font-weight: 500; cursor: pointer; }
+.edit-field.is-check input { width: 15px; height: 15px; margin: 0; cursor: pointer; accent-color: var(--fx-blue); }
 .edit-note { font-size: 0.78rem; color: var(--fx-warning); }
 
 /* 사진 고르기 — 사측 공유 파일에서 꺼낸 사진들 */

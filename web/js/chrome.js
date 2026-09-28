@@ -4,6 +4,8 @@
  * 섹션 제목·안내 줄·소제목처럼 늘 같아야 하는 말은 LLM 에 맡기지 않는다. 초안은 한국어로 보여 주고,
  * 노션에 올릴 때 같은 자리의 영어 문구로 바꿔 끼운다 — 옮기기 단계를 거치지 않으므로 글자가 흔들리지 않는다.
  * 사람이 그 문구를 프롬프트로 고치면 `chrome` 표시가 떨어져 나가고, 그때부터는 옮기기 대상이 된다.
+ * 노드에 저장되지 않고 그릴 때 붙는 문구(스텝 소제목·표 항목 이름·금지 표현 표 머리)는 사람이 고치면
+ * 그 노드의 `labels[key]`(모든 스텝에 똑같이면 문서의 `labels[key]`)에 들어간다 — doc.js `labelText`.
  *
  * `{이름}` 자리는 vars 로 채운다.
  */
@@ -78,6 +80,11 @@ export function chromeText(key, lang = 'ko', vars = {}) {
   const entry = CHROME[key];
   if (!entry) return '';
   return String(entry[lang] ?? entry.ko).replace(/\{(\w+)\}/g, (m, name) => (vars[name] ?? ''));
+}
+
+/** 사람이 고친 고정 문구의 `{이름}` 자리를 채운다. 모르는 이름은 글자 그대로 둔다(사람이 쓴 중괄호일 수 있다). */
+export function fillVars(template, vars = {}) {
+  return String(template ?? '').replace(/\{(\w+)\}/g, (m, name) => (name in vars ? String(vars[name]) : m));
 }
 
 /** 노드가 고정 문구면 그 언어의 글자, 아니면 저장된 글자. */

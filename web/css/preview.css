@@ -40,9 +40,34 @@
 .n-divider { border: 0; border-top: 1px solid var(--n-border); margin: 10px 0; }
 .n-doc-link, .notion-doc a { color: inherit; text-decoration: underline; text-decoration-color: rgba(55, 53, 47, 0.4); text-underline-offset: 2px; }
 .notion-doc code { background: rgba(135, 131, 120, 0.15); color: #EB5757; border-radius: 4px; padding: 0.1em 0.3em; font-size: 0.85em; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.c-blue { color: rgb(51, 126, 169); }
-.c-red { color: rgb(212, 76, 71); }
+/* 노션 블록 색 — 글자색과 바탕색(불러온 브리프에 나온다) */
 .c-gray { color: rgb(120, 119, 116); }
+.c-brown { color: rgb(159, 107, 83); }
+.c-orange { color: rgb(217, 115, 13); }
+.c-yellow { color: rgb(203, 145, 47); }
+.c-teal, .c-green { color: rgb(68, 131, 97); }
+.c-blue { color: rgb(51, 126, 169); }
+.c-purple { color: rgb(144, 101, 176); }
+.c-pink { color: rgb(193, 76, 138); }
+.c-red { color: rgb(212, 76, 71); }
+.c-gray_background { background: var(--n-gray-bg); }
+.c-brown_background { background: var(--n-brown-bg); }
+.c-orange_background { background: var(--n-orange-bg); }
+.c-yellow_background { background: var(--n-yellow-bg); }
+.c-teal_background, .c-green_background { background: var(--n-teal-bg); }
+.c-blue_background { background: var(--n-blue-bg); }
+.c-purple_background { background: var(--n-purple-bg); }
+.c-pink_background { background: var(--n-pink-bg); }
+.c-red_background { background: var(--n-red-bg); }
+
+/* 임베드·북마크(불러온 브리프의 틱톡 참고 영상 등) — 노션에서는 플레이어로 보인다 */
+.n-embed {
+  display: flex; align-items: center; gap: 8px;
+  border: 1px solid var(--n-border); border-radius: 6px; padding: 10px 12px; margin: 6px 0;
+  font-size: 0.9em; overflow: hidden;
+}
+.n-embed-kind { flex: none; font-size: 0.8em; font-weight: 600; color: var(--n-weak); }
+.n-embed a { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .n-callout { display: flex; gap: 8px; padding: 16px 16px 16px 12px; border-radius: 6px; margin: 6px 0; }
 .n-callout-icon { flex: none; font-size: 1.2em; line-height: 1.3; width: 24px; text-align: center; }
@@ -69,6 +94,7 @@
 .n-col { flex: 1 1 0; min-width: 0; }
 .n-sub .n-h3 { font-size: 1.15em; margin-top: 0.5em; }
 .n-sub:first-child .n-h3 { margin-top: 0; }
+.n-col > .n-block .n-h3 { font-size: 1.15em; }
 .n-empty { color: var(--n-weak); font-style: italic; }
 
 /* 사진 자리 — 회색 네모. 눌러서 사진으로 바꾼다. */
@@ -98,6 +124,8 @@
 }
 .n-slot.has-image:hover .n-slot-undo { display: block; }
 .n-slot.is-busy { opacity: 0.6; pointer-events: none; }
+/* 원본에 사진이 없던 자리 — 비워 두면 노션에 안 올라가니 옅게 */
+.n-slot.is-optional { background: #F1F1EF; border: 1px dashed rgba(55, 53, 47, 0.2); }
 
 /* ── 편집: 누를 수 있는 곳 · 추가할 틈 ────────────────────── */
 .notion-doc.is-editable [data-path] { cursor: pointer; border-radius: 4px; }

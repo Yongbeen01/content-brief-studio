@@ -187,6 +187,7 @@ test('생성: 제품 사진을 자료에서 찾아 1️⃣ 자리에 넣는다',
     inputs,
     sourceIds: [rec.id],
     jobDir: tmp(),
+    pretranslate: false,
     // 같은 run 으로 글쓰기와 사진 고르기가 함께 온다 — 프롬프트로 가른다.
     run: async (o) => (/# Photos/.test(o.prompt)
       ? { structured: { pick: 1, why: '제품 단독 컷' }, text: '' }
@@ -204,7 +205,7 @@ test('생성: 제품 사진을 자료에서 찾아 1️⃣ 자리에 넣는다',
 
   // 자료에 사진이 없으면 예전처럼 회색 자리로 둔다
   const bare = await generateBrief({
-    inputs, sourceIds: [], jobDir: tmp(), run: async () => ({ structured: sample, text: '' }),
+    inputs, sourceIds: [], jobDir: tmp(), pretranslate: false, run: async () => ({ structured: sample, text: '' }),
   });
   assert.equal(bare.doc.nodes.find((n) => n.slot === 'product').asset, undefined);
   assert.deepEqual(bare.infos, []);

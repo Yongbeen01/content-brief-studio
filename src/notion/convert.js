@@ -1,8 +1,7 @@
 import { inline } from '../brief/inline.js';
 import {
-  durationText, gridItemText, gridRows, nodeText, stepTimeline, stepTitle, tableRows, wordTableTitle,
+  durationText, gridItemText, gridRows, labelText, nodeText, stepTimeline, stepTitle, tableRows, wordTableTitle,
 } from '../../web/js/doc.js';
-import { chromeText } from '../../web/js/chrome.js';
 
 /** 노션에 올라가는 문서는 늘 영어다 — 고정 문구는 영어 쪽을 쓰고, 내용은 옮기기 단계가 이미 영어로 바꿔 둔다. */
 const LANG = 'en';
@@ -42,17 +41,27 @@ export function richText(text) {
 
 const block = (type, body) => ({ object: 'block', type, [type]: body });
 const para = (text, color = 'default') => block('paragraph', { rich_text: richText(text), color: apiColor(color) });
-const head = (level, text) => block(`heading_${level}`, { rich_text: richText(text), color: 'default', is_toggleable: false });
+const head = (level, text, color = 'default') => block(`heading_${level}`, { rich_text: richText(text), color: apiColor(color), is_toggleable: false });
 const bullets = (items) => items.map((t) => block('bulleted_list_item', { rich_text: richText(t), color: 'default' }));
 const numbers = (items) => items.map((t) => block('numbered_list_item', { rich_text: richText(t), color: 'default' }));
 const divider = () => block('divider', {});
 const column = (children) => block('column', { children: children.length ? children : [para('')] });
 const columns = (...cols) => block('column_list', { children: cols.map(column) });
 
+/** 사진 자리 → 이미지 블록. 원본에 사진이 없던 자리(optional)가 비어 있으면 null — 블록을 만들지 않는다. */
 function image(node, uploads) {
-  const id = uploads.get(node.id);
-  if (!id) throw new Error(`사진 자리(${node.label ?? node.slot})에 올릴 이미지가 없습니다.`);
+  const id = uploads.get(node?.id);
+  if (!id) {
+    if (node?.optional) return null;
+    throw new Error(`사진 자리(${node?.label ?? node?.slot})에 올릴 이미지가 없습니다.`);
+  }
   return block('image', { type: 'file_upload', file_upload: { id } });
+}
+
+/** 임베드(틱톡 참고 영상 등)는 embed, 링크 카드는 bookmark. 노션이 영상 주소를 안 받는 일이 있어 video 도 embed 로. */
+function embed(n) {
+  if (n.kind === 'bookmark') return block('bookmark', { url: n.url, caption: [] });
+  return block('embed', { url: n.url });
 }
 
 function table(rows, header) {
@@ -69,17 +78,18 @@ function table(rows, header) {
 
 function stepBlocks(doc, n, uploads, tl) {
   const t = tl.steps.get(n.id);
-  const L = (key) => chromeText(key, LANG);
-  const right = [
-    head(3, L('stepDuration')), para(durationText(t, LANG)),
-    head(3, L('stepAction')), ...bullets(n.action),
-    head(3, L('stepVisual')), ...bullets(n.visual),
-    head(3, L('stepSubtitle')), ...n.subtitle.map((s) => para(s)),
-  ];
+  const L = (key) => labelText(doc, n, key, LANG);
+  // 빈 칸은 소제목째 뺀다(불러온 브리프에 원래 없던 칸). 새로 만든 초안은 늘 채워져 있다.
+  const right = [head(3, L('stepDuration')), para(durationText(t, LANG))];
+  if (n.action?.length) right.push(head(3, L('stepAction')), ...bullets(n.action));
+  if (n.visual?.length) right.push(head(3, L('stepVisual')), ...bullets(n.visual));
+  if (n.subtitle?.length) right.push(head(3, L('stepSubtitle')), ...n.subtitle.map((s) => para(s)));
   if (n.narration?.length) right.push(head(3, L('stepNarration')), ...n.narration.map((s) => para(s)));
+  right.push(...(n.extra ?? []).flatMap((c) => nodeBlocks(doc, c, uploads, tl)));
+  const gif = image(n.image, uploads);
   return [
     head(3, `**${stepTitle(n, t, LANG)}**`),
-    columns([image(n.image, uploads)], right),
+    columns(gif ? [gif] : [], right),
     divider(),
   ];
 }
@@ -87,11 +97,13 @@ function stepBlocks(doc, n, uploads, tl) {
 function gridBlocks(n, uploads) {
   const out = [];
   gridRows(n).forEach((row, r) => {
+    const im = n.images?.[r] ? image(n.images[r], uploads) : null;
+    if (im && n.imagesFirst) out.push(im); // 불러온 브리프는 사진이 줄 위에 오기도 한다
     out.push(columns(...row.map((it) => {
       const { title, desc } = gridItemText(it, LANG);
-      return [head(3, `${it.n}. ${title}`), para(desc)];
+      return [head(3, `${it.n}. ${title}`), ...(desc ? [para(desc)] : [])];
     }), ...(row.length === 1 ? [[]] : [])));
-    if (n.images?.[r]) out.push(image(n.images[r], uploads));
+    if (im && !n.imagesFirst) out.push(im);
   });
   return out;
 }
@@ -99,19 +111,23 @@ function gridBlocks(n, uploads) {
 function nodeBlocks(doc, n, uploads, tl) {
   switch (n.type) {
     case 'paragraph': return [para(nodeText(n, LANG), n.color)];
-    case 'heading': return [head(n.level, nodeText(n, LANG))];
+    case 'heading': return [head(n.level, nodeText(n, LANG), n.color)];
     case 'bulleted': return bullets(n.items);
     case 'numbered': return numbers(n.items);
     case 'divider': return [divider()];
-    case 'image': return [image(n, uploads)];
+    case 'image': {
+      const im = image(n, uploads);
+      return im ? [im] : [];
+    }
+    case 'embed': return [embed(n)];
     case 'table': return [table(tableRows(n, LANG), n.header)];
     case 'step': return stepBlocks(doc, n, uploads, tl);
     case 'grid': return gridBlocks(n, uploads);
     case 'wordTable':
       return [
-        head(3, wordTableTitle(doc, LANG)),
+        head(3, wordTableTitle(doc, LANG, n)),
         ...(n.note ? [para(n.note)] : []),
-        table([[chromeText('wordTableDont', LANG), chromeText('wordTableInstead', LANG)],
+        table([[labelText(doc, n, 'wordTableDont', LANG), labelText(doc, n, 'wordTableInstead', LANG)],
           ...n.rows.map((r) => [r.dont, r.instead])], true),
       ];
     case 'callout': {

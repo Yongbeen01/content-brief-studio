@@ -1,6 +1,9 @@
 import { api, initSession, pollJob, sleep, uploadAsset } from './api.js';
 import { createInline } from './inline.js';
-import { clone, docToMarkdown, getAt, imageSlots, keepAssets, setAt, uid } from './doc.js';
+import {
+  clone, docLang, docToMarkdown, fillAssets, getAt, imageSlots, keepAssets, setAt, uid,
+} from './doc.js';
+import { translateFromCache } from './translatable.js';
 import { lintDoc } from './lint.js';
 import { renderDoc, setInline } from './preview.js';
 import { createEditor } from './editor.js';
@@ -30,9 +33,13 @@ const state = {
   claude: {},
   notion: {},
   generateJob: null,
+  /** 기존 브리프 불러오기 작업 — 글이 먼저 오고 사진은 뒤따른다(그동안 고칠 수 있다). */
+  importJob: null,
   /** 'ko' = 고치는 초안, 'en' = 노션에 올라갈 영어본(읽기 전용) */
   lang: 'ko',
 };
+
+const isImport = () => state.draft?.mode === 'import';
 
 /** 영어본이 지금 한국어 초안에서 나온 것인지 보는 값. 초안이 바뀌면 영어본은 버린다. */
 function docStamp(doc) {
@@ -72,14 +79,29 @@ function newDraft() {
   return {
     id: uid() + uid(),
     createdAt: Date.now(),
+    /** 'new' = 새로 생성, 'import' = 기존 브리프 업로드 */
+    mode: state.draft?.mode ?? 'new',
     inputs: Object.fromEntries(Object.keys(FIELDS).map((k) => [k, ''])),
     sourceIds: [],
+    /** 기존 브리프 — { kind:'notion', url } 또는 { kind:'pdf', sourceId, name } */
+    importSource: null,
     doc: null,
     sourceNotes: '',
     warnings: [],
     infos: [],
     published: [],
+    /** 옮겨 둔 영어 줄(「종류|한국어」 → 영어). 한 줄 고치면 그 줄만 다시 옮긴다. */
+    enCache: {},
   };
+}
+
+/** 옮긴 줄을 캐시에 더한다. 오래된 줄부터 버려 초안 파일이 커지지 않게. */
+function mergeCache(add) {
+  if (!add || typeof add !== 'object') return;
+  const next = { ...(state.draft.enCache ?? {}), ...add };
+  const keys = Object.keys(next);
+  for (const k of keys.slice(0, Math.max(0, keys.length - 1500))) delete next[k];
+  state.draft.enCache = next;
 }
 
 // ── 자동 저장 ───────────────────────────────────────────────────────────────
@@ -117,13 +139,29 @@ function refreshFormState() {
   const v = readForm();
   const { missing, bad } = formProblems(v);
   for (const lbl of document.querySelectorAll('[data-req]')) {
-    lbl.classList.toggle('is-filled', !!String(v[lbl.dataset.req] ?? '').trim());
+    const k = lbl.dataset.req;
+    lbl.classList.toggle('is-filled', k === 'importSource' ? !!state.draft.importSource : !!String(v[k] ?? '').trim());
   }
   for (const k of ['uploadUrl', 'tiktokUrl', 'amazonUrl']) $(FIELDS[k]).classList.toggle('is-invalid', !!v[k].trim() && !isUrl(v[k].trim()));
-  const reading = [...state.sources.values()].some((s) => s.status === 'reading');
+
+  if (isImport()) {
+    const src = state.draft.importSource;
+    const s = src?.kind === 'pdf' ? state.sources.get(src.sourceId) : null;
+    const pdfBusy = s?.status === 'reading';
+    const pdfBad = src?.kind === 'pdf' && (!s || s.status === 'error');
+    $('generate_btn').disabled = !src || pdfBusy || pdfBad || state.busy || !!state.importJob;
+    if (state.busy || state.importJob) return;
+    if (!src) setStatus('form_status', '노션 링크를 붙여넣거나 PDF 를 올려 주세요', 'warn');
+    else if (pdfBusy) setStatus('form_status', 'PDF 를 여는 중입니다 — 끝나면 불러올 수 있습니다', 'busy');
+    else if (pdfBad) setStatus('form_status', s?.error || 'PDF 를 다시 올려 주세요', 'bad');
+    else setStatus('form_status', state.draft.doc ? '다시 누르면 지금 미리보기 대신 불러온 브리프가 들어갑니다(지금 미리보기는 되돌리기로 살릴 수 있습니다)' : '');
+    return;
+  }
+
+  const reading = [...state.sources.values()].some((s) => s.status === 'reading' && state.draft.sourceIds.includes(s.id));
   const ok = !missing.length && !bad.length;
-  $('generate_btn').disabled = !ok || state.busy || reading;
-  if (state.busy) return;
+  $('generate_btn').disabled = !ok || state.busy || reading || !!state.importJob;
+  if (state.busy || state.importJob) return;
   if (missing.length) setStatus('form_status', `필수: ${missing.join(', ')}`, 'warn');
   else if (bad.length) setStatus('form_status', `확인해 주세요: ${bad.join(', ')}`, 'bad');
   else if (reading) setStatus('form_status', '사측 공유 파일을 읽는 중입니다 — 끝나면 생성할 수 있습니다', 'busy');
@@ -136,6 +174,124 @@ function onFormInput() {
   state.draft.inputs = readForm();
   refreshFormState();
   if (state.draft.doc) renderPreview(); // 제목은 브리프 이름을 따라간다
+  scheduleSave();
+}
+
+// ── 새로 생성 ↔ 기존 브리프 업로드 ─────────────────────────────────────────
+
+const NAME_HINT = {
+  new: '노션 페이지 제목이 됩니다. 예) [BRAND]US_TikTok_제품명 _컨셉 Guide',
+  import: '노션 페이지 제목이 됩니다. 불러오면 원래 제목이 들어갑니다 — 새 브리프로 올릴 거면 바꿔 주세요.',
+};
+
+/** 탭은 왼쪽 칸만 바꾼다 — 지금 미리보기는 그대로 둔다(불러오기·생성을 눌러야 바뀐다). */
+function applyMode() {
+  const imp = isImport();
+  for (const [id, on] of [['mode_new', !imp], ['mode_import', imp]]) {
+    $(id).classList.toggle('is-on', on);
+    $(id).setAttribute('aria-selected', String(on));
+  }
+  $('new_fields').classList.toggle('hidden', imp);
+  $('import_fields').classList.toggle('hidden', !imp);
+  $('form_section').classList.toggle('is-import', imp);
+  $('f_name_hint').textContent = NAME_HINT[imp ? 'import' : 'new'];
+  $('empty_hint').textContent = imp
+    ? '왼쪽에 기존 브리프를 넣고 [불러오기]를 누르면 여기에 그대로 나옵니다.'
+    : '왼쪽을 채우고 [생성]을 누르면 여기에 노션 페이지 모양으로 나옵니다.';
+  if (!state.busy) $('generate_btn').querySelector('.btn-text').textContent = imp ? '불러오기' : '생성';
+  renderImportSource();
+}
+
+function setMode(mode) {
+  if (!state.draft || state.draft.mode === mode) return; // 초안을 읽기 전(켜지는 중)이거나 이미 그 탭
+  if (state.busy || state.importJob) {
+    toast('지금 하는 작업이 끝난 뒤에 바꿔 주세요');
+    return;
+  }
+  state.draft.mode = mode;
+  applyMode();
+  scheduleSave();
+}
+
+// ── 기존 브리프 ─────────────────────────────────────────────────────────────
+
+function renderImportSource() {
+  const list = $('i_source');
+  list.replaceChildren();
+  const src = state.draft.importSource;
+  if (src) {
+    const s = src.kind === 'pdf' ? state.sources.get(src.sourceId) : null;
+    const row = document.createElement('div');
+    row.className = `fx-attach-item ${s?.status === 'error' ? 'bad' : s?.status === 'reading' ? 'busy' : ''}`;
+    const kind = document.createElement('span');
+    kind.className = 'fx-attach-kind';
+    kind.textContent = src.kind === 'pdf' ? 'PDF' : '노션';
+    const name = document.createElement('span');
+    name.className = 'fx-attach-name';
+    name.textContent = src.kind === 'pdf' ? (s?.name ?? src.name) : src.url;
+    name.title = name.textContent;
+    const note = document.createElement('span');
+    note.className = 'fx-attach-note';
+    if (src.kind === 'notion') note.textContent = '불러오기를 누르면 바로 옮깁니다';
+    else if (!s) note.textContent = '파일이 사라졌습니다 — 다시 올려 주세요';
+    else if (s.status === 'reading') note.textContent = '여는 중…';
+    else if (s.status === 'error') note.textContent = s.error;
+    else note.textContent = [s.pages ? `${s.pages}쪽` : '', s.images?.length ? `사진 ${s.images.length}장` : ''].filter(Boolean).join(' · ') || '준비됨';
+    note.title = note.textContent;
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'fx-link-btn';
+    del.textContent = '지우기';
+    del.addEventListener('click', removeImportSource);
+    row.append(kind, name, note, del);
+    list.append(row);
+  }
+  refreshFormState();
+}
+
+/** 기존 브리프는 하나만 — 새로 넣으면 앞의 것을 치운다. */
+async function dropImportSource() {
+  const old = state.draft.importSource;
+  state.draft.importSource = null;
+  if (old?.kind === 'pdf') {
+    state.sources.delete(old.sourceId);
+    try { await api('DELETE', `/api/sources/${old.sourceId}`); } catch { /* 목록에서는 이미 뺐다 */ }
+  }
+}
+
+async function setImportLink() {
+  const input = $('i_link');
+  const url = input.value.trim();
+  if (!url) return;
+  if (!isUrl(url) || !/(^|\.)notion\.(so|site|com)$/i.test(new URL(url).hostname)) {
+    toast('노션 링크가 아닙니다 — 노션에서 공유 → 링크 복사로 받은 주소를 넣어 주세요', true);
+    return;
+  }
+  await dropImportSource();
+  state.draft.importSource = { kind: 'notion', url };
+  input.value = '';
+  renderImportSource();
+  scheduleSave();
+}
+
+async function addImportFile(f) {
+  if (!f) return;
+  if (!/\.pdf$/i.test(f.name)) { toast(`${f.name} — 노션에서 PDF 로 내보낸 파일만 올릴 수 있습니다`, true); return; }
+  if (f.size > 50 * 1024 * 1024) { toast(`${f.name} — 50MB 를 넘습니다`, true); return; }
+  try {
+    const { source } = await api('POST', '/api/sources/file', f, { raw: true, headers: { 'x-file-name': encodeURIComponent(f.name), 'content-type': 'application/octet-stream' } });
+    await dropImportSource();
+    state.sources.set(source.id, source);
+    state.draft.importSource = { kind: 'pdf', sourceId: source.id, name: source.name };
+    renderImportSource();
+    watchSources();
+    scheduleSave();
+  } catch (e) { toast(`${f.name} — ${e.message}`, true); }
+}
+
+async function removeImportSource() {
+  await dropImportSource();
+  renderImportSource();
   scheduleSave();
 }
 
@@ -175,16 +331,23 @@ function renderSources() {
   refreshFormState();
 }
 
+/** 이 초안이 쓰는 자료 전부 — 사측 공유 파일과, 기존 브리프로 올린 PDF. */
+const trackedSourceIds = () => [
+  ...state.draft.sourceIds,
+  ...(state.draft.importSource?.kind === 'pdf' ? [state.draft.importSource.sourceId] : []),
+];
+
 let sourcePoll = null;
 function watchSources() {
   if (sourcePoll) return;
   sourcePoll = setInterval(async () => {
-    const reading = state.draft.sourceIds.filter((id) => state.sources.get(id)?.status === 'reading');
+    const reading = trackedSourceIds().filter((id) => state.sources.get(id)?.status === 'reading');
     if (!reading.length) { clearInterval(sourcePoll); sourcePoll = null; return; }
     try {
       const { sources } = await api('GET', `/api/sources?ids=${reading.join(',')}`);
       for (const s of sources) state.sources.set(s.id, s);
       renderSources();
+      renderImportSource();
     } catch { /* 다음 차례 */ }
   }, 1500);
 }
@@ -235,11 +398,12 @@ let videoPanel = null;
 /**
  * 지금 폼 입력을 반영한 문서. 입력에서 바로 나오는 두 곳 — 페이지 제목과 Account Tag 줄 — 은
  * 생성 뒤에 폼을 고쳐도 따라간다(지침: "Account Tag 는 Account ID 입력값 그대로").
+ * 불러온 브리프는 Account Tag 를 원본 그대로 둔다(폼의 Account ID 는 새로 생성할 때의 입력이다).
  */
 function currentDoc() {
   const d = state.draft.doc;
   if (!d) return null;
-  const account = String(state.draft.inputs.accountId ?? '').replace(/^@+/, '').trim();
+  const account = d.origin === 'import' ? '' : String(state.draft.inputs.accountId ?? '').replace(/^@+/, '').trim();
   const nodes = d.nodes.map((n) => {
     if (n.type !== 'table' || n.role !== 'overview' || !account) return n;
     return { ...n, rows: n.rows.map((r) => (/^account tag/i.test(String(r[0])) ? [r[0], `@${account}`, ...r.slice(2)] : r)) };
@@ -290,15 +454,17 @@ function renderPreview() {
   if (state.lang === 'en' && !enFresh()) state.lang = 'ko'; // 초안이 바뀌면 한국어로 돌아간다
   const showEn = state.lang === 'en';
   const shown = showEn ? state.draft.docEn : doc;
+  // 영어 브리프를 불러온 것이면 고치는 화면부터 영어다(고정 문구도 영어로).
+  const english = !!doc && docLang(doc) === 'en';
   $('empty_preview').classList.toggle('hidden', !!doc);
   $('doc').classList.toggle('hidden', !doc);
   $('preview_bar').classList.toggle('hidden', !doc);
-  if (doc) renderDoc($('doc'), shown, { editable: !showEn && (!state.busy || editor?.isRunning()), lang: showEn ? 'en' : 'ko' });
+  if (doc) renderDoc($('doc'), shown, { editable: !showEn && (!state.busy || editor?.isRunning()), lang: showEn || english ? 'en' : 'ko' });
   // 문서를 통째로 다시 그렸으니 상자 안에서 돌고 있던 영상 작업을 다시 그려 넣는다.
   if (!showEn) videoPanel?.paint();
   $('preview_hint').textContent = showEn
     ? '영어 미리보기 · 노션에 올라갈 모양 (읽기 전용)'
-    : '누르면 고치기 · 사이를 누르면 추가';
+    : english ? '영어 원문 그대로 · 누르면 고치기 · 사이를 누르면 추가' : '누르면 고치기 · 사이를 누르면 추가';
   $('preview_hint').classList.toggle('ok', showEn);
   $('lang_btn').textContent = showEn ? '한국어로 돌아가기' : '영어로 보기';
   $('lang_btn').disabled = !doc || state.busy;
@@ -349,13 +515,27 @@ const PHASES = [
   { key: 'compose', label: '기획서 쓰기 (Claude)' },
   { key: 'images', label: '제품 사진 고르기' },
   { key: 'build', label: '검토·조립' },
+  { key: 'translate', label: '영어본 준비 (영어로 보기용)' },
 ];
 
-function renderProgress(job, started) {
-  const idx = Math.max(0, PHASES.findIndex((p) => p.key === job.phase));
+const IMPORT_PHASES = {
+  notion: [
+    { key: 'read', label: '노션 페이지 읽기' },
+    { key: 'build', label: '미리보기로 옮기기' },
+    { key: 'images', label: '사진 가져오기' },
+  ],
+  pdf: [
+    { key: 'read', label: 'PDF 옮겨 적기 (Claude)' },
+    { key: 'build', label: '미리보기로 옮기기' },
+    { key: 'images', label: '사진 꺼내기' },
+  ],
+};
+
+function renderProgress(job, started, phases = PHASES) {
+  const idx = Math.max(0, phases.findIndex((p) => p.key === job.phase));
   const done = job.status === 'done';
   const failed = job.status === 'failed' || job.status === 'cancelled';
-  $('progress_steps').replaceChildren(...PHASES.map((p, i) => {
+  $('progress_steps').replaceChildren(...phases.map((p, i) => {
     let st = 'pending';
     if (done || i < idx) st = 'done';
     else if (i === idx) st = failed ? 'failed' : 'running';
@@ -415,7 +595,7 @@ async function generate() {
   state.generateJob = 'starting';
   setBusy(true);
   $('generate_btn').querySelector('.btn-text').textContent = '생성 중…';
-  setStatus('form_status', 'Claude 가 쓰는 동안 1~2분 걸립니다. 창을 닫아도 앱은 계속 만듭니다.', 'busy');
+  setStatus('form_status', 'Claude 가 쓰고 영어본까지 만들어 두는 동안 2분쯤 걸립니다. 창을 닫아도 앱은 계속 만듭니다.', 'busy');
   const tick = setInterval(() => { $('progress_eta').textContent = fmtElapsed(Date.now() - started); }, 1000);
   try {
     const { jobId } = await api('POST', '/api/generate', { inputs, sourceIds: state.draft.sourceIds });
@@ -424,6 +604,12 @@ async function generate() {
     if (job.status === 'done') {
       const r = job.result;
       commitDoc(r.doc);
+      // 미리 만들어 둔 영어본 — [영어로 보기]가 기다림 없이 바로 나온다.
+      mergeCache(r.enCache);
+      if (r.docEn) {
+        state.draft.docEn = r.docEn;
+        state.draft.docEnFrom = docStamp(currentDoc());
+      }
       state.draft.sourceNotes = r.sourceNotes;
       state.draft.warnings = r.warnings ?? [];
       state.draft.infos = r.infos ?? [];
@@ -445,7 +631,122 @@ async function generate() {
   } finally {
     clearInterval(tick);
     state.generateJob = null;
-    $('generate_btn').querySelector('.btn-text').textContent = '생성';
+    $('generate_btn').querySelector('.btn-text').textContent = isImport() ? '불러오기' : '생성';
+    setBusy(false);
+    renderPreview();
+  }
+}
+
+// ── 기존 브리프 불러오기 ────────────────────────────────────────────────────
+
+/** 불러온 글을 미리보기에 올린다. 제목은 원래 제목으로(바꾸려면 이름 칸에서). */
+function showImported(r) {
+  if (r.doc.title) {
+    state.draft.inputs.briefName = r.doc.title;
+    $('f_name').value = r.doc.title;
+  }
+  commitDoc(r.doc);
+  if (r.docEn) {
+    state.draft.docEn = r.docEn;
+    state.draft.docEnFrom = docStamp(currentDoc());
+  }
+  state.draft.sourceNotes = '';
+  state.draft.warnings = r.warnings ?? [];
+  state.draft.infos = r.infos ?? [];
+  renderPreview();
+  scheduleSave();
+  $('doc_card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+/**
+ * 뒤따라 도착한 사진을 빈 자리에 채운다 — 되돌리기 기록에는 남기지 않는다(되돌리면 불러오기 전으로 가야 한다).
+ * 되돌리기 목록 속 문서에도 같이 채워, 불러온 뒤에 고친 것을 되돌려도 사진이 사라지지 않게 한다.
+ */
+function applyAssets(assets, applied) {
+  const fresh = Object.fromEntries(Object.entries(assets ?? {}).filter(([id]) => !applied.has(id)));
+  if (!Object.keys(fresh).length) return;
+  for (const id of Object.keys(fresh)) applied.add(id);
+  const wasFresh = enFresh();
+  const r = fillAssets(state.draft.doc, fresh);
+  if (!r.count) return;
+  state.draft.doc = r.doc;
+  state.undo = state.undo.map((d) => fillAssets(d, fresh).doc);
+  if (state.draft.docEn) {
+    state.draft.docEn = fillAssets(state.draft.docEn, fresh).doc;
+    if (wasFresh) state.draft.docEnFrom = docStamp(currentDoc());
+  }
+  renderPreview();
+  scheduleSave();
+}
+
+async function runImport() {
+  if (state.busy || state.importJob) return;
+  const src = state.draft.importSource;
+  if (!src) return refreshFormState();
+  if (src.kind === 'pdf' && state.claude.loggedIn === false) {
+    toast('PDF 는 Claude 가 옮겨 적습니다 — 먼저 오른쪽 위 [Claude 로그인]을 눌러 주세요', true);
+    $('claude_btn').focus();
+    return;
+  }
+  const phases = IMPORT_PHASES[src.kind];
+  const started = Date.now();
+  const btn = $('generate_btn').querySelector('.btn-text');
+  $('progress_panel').classList.remove('hidden');
+  $('progress_title').textContent = '기존 브리프를 불러오고 있습니다';
+  $('progress_cancel').classList.remove('hidden');
+  state.generateJob = 'starting';
+  setBusy(true);
+  btn.textContent = '불러오는 중…';
+  setStatus('form_status', src.kind === 'pdf' ? 'Claude 가 PDF 를 글자 그대로 옮겨 적는 동안 2~3분 걸립니다(쪽이 많으면 더).' : '노션 페이지를 읽는 중입니다.', 'busy');
+  const tick = setInterval(() => { $('progress_eta').textContent = fmtElapsed(Date.now() - started); }, 1000);
+  let shown = false;
+  const applied = new Set();
+  try {
+    const { jobId } = await api('POST', '/api/import', src.kind === 'notion' ? { url: src.url } : { sourceId: src.sourceId });
+    state.generateJob = jobId;
+    state.importJob = jobId;
+    const job = await pollJob(jobId, (j) => {
+      renderProgress(j, started, phases);
+      if (!shown && j.data?.doc) {
+        shown = true;
+        // 글이 먼저 왔다 — 사진을 받는 동안에도 고칠 수 있게 풀어 준다.
+        state.generateJob = null;
+        setBusy(false);
+        showImported(j.data);
+        btn.textContent = '불러오기';
+        $('progress_title').textContent = '미리보기를 띄웠습니다 — 사진을 마저 가져오는 중';
+        setStatus('form_status', '사진은 받는 대로 채워집니다. 그동안 고쳐도 됩니다.', 'busy');
+      }
+      if (shown) applyAssets(j.data?.assets, applied);
+    });
+    if (job.status === 'done') {
+      const r = job.result;
+      if (!shown) { shown = true; showImported(r); }
+      applyAssets(r.assets, applied);
+      state.draft.warnings = r.warnings ?? [];
+      state.draft.infos = r.infos ?? [];
+      renderPreview();
+      scheduleSave();
+      $('progress_title').textContent = `불러왔습니다 (${fmtElapsed(Date.now() - started)})`;
+      $('progress_cancel').classList.add('hidden');
+      setTimeout(() => $('progress_panel').classList.add('hidden'), 4000);
+      toast('기존 브리프를 그대로 불러왔습니다');
+    } else {
+      const why = job.error?.message ?? '실패했습니다';
+      $('progress_title').textContent = job.status === 'cancelled'
+        ? (shown ? '사진 가져오기를 멈췄습니다' : '멈췄습니다')
+        : (shown ? '사진을 다 가져오지 못했습니다' : '불러오지 못했습니다');
+      $('progress_cancel').classList.add('hidden');
+      setStatus('form_status', why, 'bad');
+    }
+  } catch (e) {
+    $('progress_panel').classList.add('hidden');
+    setStatus('form_status', e.message, 'bad');
+  } finally {
+    clearInterval(tick);
+    state.generateJob = null;
+    state.importJob = null;
+    btn.textContent = isImport() ? '불러오기' : '생성';
     setBusy(false);
     renderPreview();
   }
@@ -453,22 +754,33 @@ async function generate() {
 
 // ── 영어본 ──────────────────────────────────────────────────────────────────
 
-/** 지금 초안의 영어본. 없거나 낡았으면 Claude 로 옮긴다. */
+/**
+ * 지금 초안의 영어본. 옮겨 둔 줄(캐시)만으로 되면 그 자리에서 바로 만들고,
+ * 모자란 줄이 있으면 **그 줄만** Claude 로 옮긴다.
+ */
 async function ensureEnglish() {
   if (enFresh()) return state.draft.docEn;
   const doc = currentDoc();
   const stamp = docStamp(doc);
+  const local = translateFromCache(doc, state.draft.enCache);
+  if (local) {
+    state.draft.docEn = local;
+    state.draft.docEnFrom = stamp;
+    scheduleSave();
+    return local;
+  }
   setBusy(true);
   const hint = $('preview_hint');
   const started = Date.now();
   hint.textContent = '영어로 옮기는 중…';
   hint.classList.add('warn');
   try {
-    const { jobId } = await api('POST', '/api/translate', { doc });
+    const { jobId } = await api('POST', '/api/translate', { doc, enCache: state.draft.enCache ?? {} });
     const job = await pollJob(jobId, (j) => {
       hint.textContent = `${j.detail || '영어로 옮기는 중'} · ${Math.round((Date.now() - started) / 1000)}초`;
     });
     if (job.status !== 'done') throw new Error(job.error?.message ?? '영어로 옮기지 못했습니다');
+    mergeCache(job.result.enCache);
     state.draft.docEn = job.result.docEn;
     state.draft.docEnFrom = stamp;
     scheduleSave();
@@ -500,10 +812,10 @@ async function toggleLang() {
 
 let slotTarget = null;
 
-/** 지금 초안에 붙은 사측 공유 파일에서 꺼낸 사진 전부. */
+/** 지금 초안에 붙은 사측 공유 파일(과 기존 브리프 PDF)에서 꺼낸 사진 전부. */
 function sourcePhotos() {
   const out = [];
-  for (const id of state.draft.sourceIds) {
+  for (const id of trackedSourceIds()) {
     const s = state.sources.get(id);
     for (const im of s?.images ?? []) out.push({ ...im, sourceId: id, from: s.name });
   }
@@ -731,7 +1043,8 @@ function openPublish() {
     connectNotion();
     return;
   }
-  const slots = imageSlots(doc);
+  // 원본에 사진이 없던 자리(optional)는 비어 있으면 아예 안 올라간다.
+  const slots = imageSlots(doc).filter((s) => s.node.asset || !s.node.optional);
   const filled = slots.filter((s) => s.node.asset).length;
   const kv = $('publish_kv');
   kv.replaceChildren();
@@ -742,12 +1055,15 @@ function openPublish() {
   };
   add('만들 위치', state.notion.parentPageId === DEFAULT_PARENT ? 'Contents Guidline 아래 새 페이지' : `테스트 부모 ${state.notion.parentPageId} 아래 새 페이지`);
   add('페이지 제목', doc.title || '(비어 있음)');
-  add('언어', enFresh() ? '영어본 준비됨 (영어로 보기로 확인 가능)' : '올리기 직전에 영어로 옮깁니다');
+  const ready = enFresh() || !!translateFromCache(doc, state.draft.enCache);
+  add('언어', docLang(doc) === 'en' && ready ? '영어 브리프 그대로 올립니다'
+    : ready ? '영어본 준비됨 (영어로 보기로 확인 가능)' : '올리기 직전에 영어로 옮깁니다(바뀐 줄만)');
   add('사진', `${filled}곳 넣음 · ${slots.length - filled}곳 회색 이미지`);
   const warns = lintDoc(doc, { plain: inline.plain }).filter((w) => w.level === 'warn');
   const extra = [];
   const vids = videoPanel?.busyCount() ?? 0;
   if (vids) extra.push({ level: 'warn', text: `영상에서 GIF 를 만드는 중인 자리가 ${vids}곳 있습니다. 지금 올리면 그 자리는 회색으로 올라갑니다.` });
+  if (state.importJob) extra.push({ level: 'warn', text: '불러온 브리프의 사진을 아직 가져오는 중입니다. 지금 올리면 못 가져온 자리는 회색으로 올라갑니다.' });
   if (state.draft.published?.length) extra.push({ level: 'warn', text: `이 초안으로 이미 ${state.draft.published.length}번 만들었습니다. 한 번 더 누르면 새 페이지가 하나 더 생깁니다(기존 페이지는 그대로).` });
   $('publish_warns').replaceChildren(...[...extra, ...warns].map((w) => {
     const li = document.createElement('li');
@@ -775,9 +1091,9 @@ async function doPublish() {
   setBusy(true);
   const bar = $('publish_bar');
   try {
-    // 안 바꾼 사진 자리는 글자를 그린 회색 이미지로 올린다.
+    // 안 바꾼 사진 자리는 글자를 그린 회색 이미지로 올린다(원본에 사진이 없던 자리는 빼고).
     const placeholders = {};
-    const empty = imageSlots(doc).filter((s) => !s.node.asset);
+    const empty = imageSlots(doc).filter((s) => !s.node.asset && !s.node.optional);
     let i = 0;
     for (const s of empty) {
       i += 1;
@@ -787,9 +1103,10 @@ async function doPublish() {
       placeholders[s.node.id] = asset.id;
       bar.style.width = `${Math.round((i / Math.max(1, empty.length)) * 15)}%`;
     }
-    // 영어본이 준비돼 있으면 그대로 올리고, 아니면 서버가 올리기 직전에 옮긴다.
-    const send = enFresh() ? state.draft.docEn : doc;
-    const { jobId } = await api('POST', '/api/publish', { doc: send, placeholders });
+    // 영어본이 준비돼 있으면(또는 옮겨 둔 줄로 바로 만들 수 있으면) 그대로 올리고,
+    // 아니면 서버가 올리기 직전에 옮긴다 — 옮겨 둔 줄은 캐시로 넘겨 바뀐 줄만 옮기게 한다.
+    const send = enFresh() ? state.draft.docEn : (translateFromCache(doc, state.draft.enCache) ?? doc);
+    const { jobId } = await api('POST', '/api/publish', { doc: send, placeholders, enCache: state.draft.enCache ?? {} });
     const job = await pollJob(jobId, (j) => {
       setStatus('publish_status', j.detail || '노션에 올리는 중', 'busy');
       const base = { check: 15, translate: 18, images: 50, page: 80, blocks: 82 }[j.phase] ?? 15;
@@ -799,6 +1116,7 @@ async function doPublish() {
     if (job.status === 'done') {
       bar.style.width = '100%';
       const { url, docEn } = job.result;
+      mergeCache(job.result.enCache);
       if (docEn) {
         state.draft.docEn = docEn;
         state.draft.docEnFrom = docStamp(doc);
@@ -840,23 +1158,29 @@ async function doPublish() {
 async function loadDraft() {
   const { draft } = await api('GET', '/api/drafts/current');
   state.draft = draft ?? newDraft();
+  state.draft.mode ??= 'new';
   state.draft.sourceIds ??= [];
+  state.draft.importSource ??= null;
   state.draft.published ??= [];
   state.draft.warnings ??= [];
   state.draft.infos ??= [];
+  state.draft.enCache ??= {};
   fillForm(state.draft.inputs);
-  if (state.draft.sourceIds.length) {
-    const { sources } = await api('GET', `/api/sources?ids=${state.draft.sourceIds.join(',')}`);
+  const ids = trackedSourceIds();
+  if (ids.length) {
+    const { sources } = await api('GET', `/api/sources?ids=${ids.join(',')}`);
     for (const s of sources) state.sources.set(s.id, s);
     state.draft.sourceIds = state.draft.sourceIds.filter((id) => state.sources.has(id));
+    if (state.draft.importSource?.kind === 'pdf' && !state.sources.has(state.draft.importSource.sourceId)) state.draft.importSource = null;
     watchSources();
   }
   renderSources();
+  applyMode();
   renderPreview();
 }
 
 function startNew() {
-  if (state.busy) return;
+  if (state.busy || state.importJob) return;
   // eslint-disable-next-line no-alert
   if (!window.confirm('지금 초안을 닫고 새 기획서를 시작할까요? (지금 초안은 저장돼 있습니다)')) return;
   state.draft = newDraft();
@@ -864,33 +1188,49 @@ function startNew() {
   state.sources.clear();
   fillForm(state.draft.inputs);
   renderSources();
+  applyMode();
   renderPreview();
   scheduleSave();
-  $('f_name').focus();
+  $(isImport() ? 'i_link' : 'f_name').focus();
 }
 
 function wire() {
   for (const id of Object.values(FIELDS)) $(id).addEventListener('input', onFormInput);
-  $('generate_btn').addEventListener('click', generate);
+  $('generate_btn').addEventListener('click', () => (isImport() ? runImport() : generate()));
   $('progress_cancel').addEventListener('click', async () => {
-    if (state.generateJob && state.generateJob !== 'starting') await api('POST', `/api/jobs/${state.generateJob}/cancel`).catch(() => {});
+    const job = state.importJob ?? state.generateJob;
+    if (job && job !== 'starting') await api('POST', `/api/jobs/${job}/cancel`).catch(() => {});
   });
   $('f_attach_btn').addEventListener('click', () => $('f_files').click());
   $('f_files').addEventListener('change', (e) => { addFiles([...e.target.files]); e.target.value = ''; });
   $('f_notion').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addNotionLink(); } });
   $('f_notion').addEventListener('paste', () => setTimeout(() => { if (/notion\.(so|site|com)/.test($('f_notion').value)) addNotionLink(); }, 0));
 
-  // 파일을 폼 위로 끌어다 놓아도 된다.
+  // 새로 생성 ↔ 기존 브리프 업로드
+  for (const b of document.querySelectorAll('#mode_tabs [data-mode]')) b.addEventListener('click', () => setMode(b.dataset.mode));
+  $('i_attach_btn').addEventListener('click', () => $('i_file').click());
+  $('i_file').addEventListener('change', (e) => { addImportFile(e.target.files?.[0]); e.target.value = ''; });
+  $('i_link').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); setImportLink(); } });
+  $('i_link').addEventListener('paste', () => setTimeout(() => { if (/notion\.(so|site|com)/.test($('i_link').value)) setImportLink(); }, 0));
+
+  // 파일을 폼 위로 끌어다 놓아도 된다(기존 브리프 탭이면 그 PDF 가 기존 브리프가 된다).
   const form = $('form_section');
   form.addEventListener('dragover', (e) => { e.preventDefault(); });
-  form.addEventListener('drop', (e) => { e.preventDefault(); if (e.dataTransfer?.files?.length) addFiles([...e.dataTransfer.files]); });
+  form.addEventListener('drop', (e) => {
+    e.preventDefault();
+    const files = [...(e.dataTransfer?.files ?? [])];
+    if (!files.length) return;
+    if (isImport()) addImportFile(files[0]);
+    else addFiles(files);
+  });
 
   $('undo_btn').addEventListener('click', undo);
   $('lang_btn').addEventListener('click', toggleLang);
   $('copy_md_btn').addEventListener('click', async () => {
     const showEn = state.lang === 'en' && enFresh();
+    const lang = showEn || docLang(currentDoc()) === 'en' ? 'en' : 'ko';
     try {
-      await navigator.clipboard.writeText(docToMarkdown(showEn ? state.draft.docEn : currentDoc(), showEn ? 'en' : 'ko'));
+      await navigator.clipboard.writeText(docToMarkdown(showEn ? state.draft.docEn : currentDoc(), lang));
       toast(showEn ? '영어본 마크다운을 복사했습니다' : '마크다운을 복사했습니다');
     } catch { toast('복사하지 못했습니다', true); }
   });

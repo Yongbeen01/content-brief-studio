@@ -27,12 +27,33 @@
       <!-- 왼쪽: 입력 -->
       <section class="col-form">
         <div class="card" id="form_section">
+          <div class="mode-tabs" id="mode_tabs" role="tablist" aria-label="만드는 방법">
+            <button type="button" class="mode-tab is-on" role="tab" data-mode="new" id="mode_new">새로 생성</button>
+            <button type="button" class="mode-tab" role="tab" data-mode="import" id="mode_import">기존 브리프 업로드</button>
+          </div>
+
           <div class="form-group">
             <label for="f_name" class="fx-required-label" data-req="briefName">컨텐츠 브리프 이름</label>
-            <p class="form-hint">노션 페이지 제목이 됩니다. 예) [BRAND]US_TikTok_제품명 _컨셉 Guide</p>
+            <p class="form-hint" id="f_name_hint">노션 페이지 제목이 됩니다. 예) [BRAND]US_TikTok_제품명 _컨셉 Guide</p>
             <input type="text" id="f_name" autocomplete="off" placeholder="[CLERIVY]US_TikTok_Microdart Spot Patch _Close-Up & Reaction Angle Guide">
           </div>
 
+          <!-- 기존 브리프 업로드: 이미 만든 브리프를 그대로 옮겨 바로 미리보기로 -->
+          <div class="hidden" id="import_fields">
+            <div class="form-group">
+              <label for="i_link" class="fx-required-label" data-req="importSource">기존 브리프</label>
+              <p class="form-hint">이미 만든 브리프의 <b>노션 링크</b>를 붙여넣거나, 노션에서 <b>PDF 로 내보낸 파일</b>을 올리세요. 내용을 그대로 옮겨 바로 미리보기로 보여 줍니다 — 그다음은 새로 만든 것과 똑같이 고치고 노션에 올리면 됩니다.</p>
+              <div class="fx-attach">
+                <button type="button" class="fx-attach-btn" id="i_attach_btn">PDF 첨부</button>
+                <input type="text" id="i_link" autocomplete="off" placeholder="노션 링크를 붙여넣고 Enter">
+              </div>
+              <input type="file" id="i_file" class="fx-hidden-file" accept=".pdf">
+              <div class="fx-attach-list" id="i_source"></div>
+              <p class="form-hint import-note">노션 링크는 몇 초면 옵니다(움직이는 GIF 까지). PDF 는 Claude 가 옮겨 적어 2~3분(5쪽 기준) 걸리고, GIF 는 첫 장면 사진으로 들어갑니다.</p>
+            </div>
+          </div>
+
+          <div id="new_fields">
           <div class="form-group">
             <label for="f_upload" class="fx-required-label" data-req="uploadUrl">업로드폼 링크</label>
             <p class="form-hint">크리에이터가 영상 주소를 제출할 폼 — 「submit your video URL here」에 걸립니다.</p>
@@ -59,7 +80,7 @@
 
           <div class="form-group">
             <label for="f_notion">사측 공유 파일 <span class="opt">(선택)</span></label>
-            <p class="form-hint">브랜드가 준 자료 — pdf·pptx·docx·xlsx 파일 또는 노션 링크. 제품 설명·해시태그·장면·Do's 를 여기서 찾습니다.</p>
+            <p class="form-hint">브랜드가 준 자료 — pdf·pptx·docx·xlsx 파일 또는 노션 링크. 제품 설명·해시태그·장면·Do's 를 여기서 찾습니다. 이미 만든 브리프를 고치려면 위 [기존 브리프 업로드]로.</p>
             <div class="fx-attach">
               <button type="button" class="fx-attach-btn" id="f_attach_btn">첨부파일</button>
               <input type="text" id="f_notion" autocomplete="off" placeholder="노션 링크를 붙여넣고 Enter">
@@ -78,6 +99,7 @@
             <label for="f_concept" class="fx-required-label" data-req="concept">컨셉 설명</label>
             <p class="form-hint">영상의 전반적인 내용·타입·흐름.</p>
             <textarea id="f_concept" class="tall" placeholder="클로즈업과 리액션 위주. 붙이는 순간의 리액션으로 시작해서 패드 → 패치 → 떼어낸 뒤 모습 순서로…"></textarea>
+          </div>
           </div>
         </div>
 
@@ -124,7 +146,7 @@
         <div class="doc-card" id="doc_card">
           <div class="empty-preview" id="empty_preview">
             <strong>아직 미리보기가 없습니다</strong>
-            왼쪽을 채우고 [생성]을 누르면 여기에 노션 페이지 모양으로 나옵니다.
+            <span id="empty_hint">왼쪽을 채우고 [생성]을 누르면 여기에 노션 페이지 모양으로 나옵니다.</span>
           </div>
           <div class="notion-doc hidden" id="doc"></div>
         </div>

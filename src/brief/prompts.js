@@ -127,9 +127,13 @@ Slot conventions (the label in brackets tells you which one):
 - Do title — positive imperative in Title Case. Do one-line rule — one short sentence with a concrete criterion.
 - Don't title — starts with "DO NOT " in capitals. Don't one-line reason — one short sentence.
 - caution note / paragraph / heading — same meaning, house tone.
+- label — a short fixed heading the brand team renamed (e.g. a step sub-heading like "🩷 Action", a table item name).
+  Keep its emoji and keep it as short as a heading.
+- step heading — a whole step heading line the team rewrote. Keep "Step N", "(HOOK)" and ⭐ exactly where they are; write the rest in Title Case.
 
 Hard rules
 - Keep every number, brand name, product name, hashtag, @handle, URL and ingredient name exactly as they are.
+- Keep placeholders like {n} exactly as they are (the app fills in the number).
 - Keep the markdown markers that are in the Korean line (**bold**, [text](url)) around the same idea.
 - Do not add facts that are not in the Korean line. Do not merge or split lines.
 - Cosmetic-safe wording only: no treat / cure / heal / prevent / acne treatment.
@@ -167,6 +171,10 @@ You change ONE part of an existing guide, following the user's instruction. The 
 ${FORMAT_RULES}`;
 }
 
+/** 불러온 영어 브리프를 고칠 때 — 초안 규칙("한국어로 쓴다")보다 이게 먼저다. */
+export const ENGLISH_DOC_NOTE = 'This guide was imported as it is and is already written in US English. '
+  + 'Write the new value in US English (not Korean), matching the wording style of the rest of the guide.';
+
 export function editUser({ docMarkdown, sourceNotes, where, kind, current, instruction, hint = '' }) {
   return `# The whole guide (context)
 ${docMarkdown}
@@ -186,7 +194,7 @@ ${instruction}
 Return the new value for the target as JSON now.`;
 }
 
-export function insertUser({ docMarkdown, sourceNotes, where, kind, allowed, instruction }) {
+export function insertUser({ docMarkdown, sourceNotes, where, kind, allowed, instruction, hint = '' }) {
   return `# The whole guide (context)
 ${docMarkdown}
 
@@ -197,9 +205,73 @@ ${sourceNotes || '(none)'}
 - Where: ${where}
 - Kind of container: ${kind}
 - Allowed: ${allowed}
-
+${hint ? `\n${hint}\n` : ''}
 # What to add
 ${instruction}
 
 Return only the new content to insert, as JSON, now.`;
+}
+
+// ── 기존 브리프 PDF 옮겨 적기 ───────────────────────────────────────────────
+
+/**
+ * 노션에서 PDF 로 내보낸 브리프를 **글자 하나 바꾸지 않고** 구조 있는 마크다운으로 옮겨 적게 한다.
+ * 이 마크다운은 src/brief/import-pdf.js 의 파서가 읽는다 — 문법을 바꾸면 파서도 같이 바꾼다.
+ */
+export function importPdfSystem() {
+  return `You transcribe a Notion page that was exported to PDF back into structured markdown.
+
+This is a copy job, not a writing job:
+- Copy every word EXACTLY as it appears — same language, spelling, capitalization, emoji and punctuation.
+  Never translate, summarize, shorten, correct, reorder or add anything.
+- Keep Notion's block structure: one block per heading, paragraph, list item, callout, image, table, divider.
+- Do not transcribe the page title (return it separately), the page icon, or page headers/footers/page numbers
+  that the PDF printer added.
+
+Markup (use exactly this):
+- Headings: "# " (largest, H1), "## " (H2), "### " (H3) — pick by visual size relative to each other.
+- Paragraph: plain text. Separate blocks with a blank line. A line break inside one block stays a single newline.
+- Bulleted item "- text", numbered item "1. text", to-do "- [ ] text" / "- [x] text". Indent sub-items by two spaces.
+- Quote: "> text". Divider (thin horizontal rule): "---" on its own line.
+- Callout (a shaded box, usually with an emoji at the top-left):
+  <callout icon="📌" color="blue_background">
+  ...the blocks inside...
+  </callout>
+  color is one of gray, brown, orange, yellow, green, blue, purple, pink, red + "_background" (the box tint).
+  Leave icon="" when the box has no emoji.
+- Side-by-side columns:
+  <columns>
+  <column>
+  ...blocks of the left column...
+  </column>
+  <column>
+  ...blocks of the right column...
+  </column>
+  </columns>
+- Table: markdown pipe table. Put a "| --- | --- |" row after the first row only when the first row is a header
+  (shaded or bold). Line breaks inside a cell: write <br>.
+- Image: "![short description](image:N)" on its own line, where N is the number of that picture in the image list
+  you are given (match by page, position, size and shape). If the picture is not in the list, write image:? .
+  The wide banner at the very top of the page (page cover) is not a block — skip it.
+- Embedded video/player or link card: <embed url="https://…"/> on its own line (use the link from the link list).
+- Inline: **bold**, *italic*, ~~strikethrough~~, \`code\`, [text](url).
+  Links are invisible in a PDF, so you get the list of the PDF's links in page order: put each one on the words it
+  belongs to (e.g. a Google Form link on "submit your video URL here"). Never invent a URL.
+- A whole line in colored text (e.g. red): add " {color=red}" at the end of that heading or paragraph line.`;
+}
+
+export function importPdfUser({ pdfPath, links = [], images = [] }) {
+  const linkList = links.length ? links.map((u, i) => `${i + 1}. ${u}`).join('\n') : '(none)';
+  const imageList = images.length
+    ? images.map((im) => `${im.n}. page ${im.page}, about ${im.pos}% down the page, ${im.width}×${im.height} px (${im.shape})`).join('\n')
+    : '(none)';
+  return `Read this PDF with the Read tool first: ${pdfPath}
+
+# Links in the PDF (page order)
+${linkList}
+
+# Pictures in the PDF (reading order; small icons and emoji are left out)
+${imageList}
+
+Return {"title": "<the page title>", "markdown": "<the whole page body>"} now.`;
 }

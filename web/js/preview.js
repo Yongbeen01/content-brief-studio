@@ -1,7 +1,6 @@
 import {
-  durationText, gridItemText, gridRows, nodeText, stepTimeline, stepTitle, tableRows, wordTableTitle,
+  STEP_LABELS, durationText, gridItemText, gridRows, labelText, nodeText, stepTimeline, stepTitle, tableRows, wordTableTitle,
 } from './doc.js';
-import { chromeText } from './chrome.js';
 
 /**
  * 문서 트리 → 노션처럼 보이는 DOM.
@@ -70,7 +69,10 @@ function slot(node, path, cls = '') {
     if (node.hint) box.append(el('div', { class: 'n-slot-hint' }, node.hint));
     // 스텝의 참고 GIF 자리는 누르면 상자 안에서 영상→GIF 를 만든다(web/js/video.js 가 그린다).
     box.append(el('div', { class: 'n-slot-hint' }, node.slot === 'step' ? '눌러서 영상·GIF 넣기' : '눌러서 사진 넣기'));
+    // 원본에 사진이 없던 자리 — 비워 두면 노션에 회색 이미지를 만들지 않는다.
+    if (node.optional) box.append(el('div', { class: 'n-slot-hint' }, '비워 두면 노션에는 올라가지 않습니다'));
   }
+  if (node.optional && !node.asset) box.classList.add('is-optional');
   return box;
 }
 
@@ -78,13 +80,22 @@ function list(tag, items, path) {
   return el(tag, { class: `n-block n-${tag}`, dataset: { path: P(path) } }, items.map((t) => el('li', {}, rich(t))));
 }
 
+/** 노션 블록 색 — 글자색(red)·바탕색(red_background) 둘 다. */
+const colorClass = (c) => (c && c !== 'default' ? `c-${c}` : '');
+
+const EMBED_KIND = { embed: '임베드', bookmark: '북마크', video: '영상' };
+
 function renderNode(doc, n, path, ctx) {
   const lang = ctx.lang;
   switch (n.type) {
     case 'paragraph':
-      return el('div', { class: `n-block n-p ${n.color && n.color !== 'default' ? `c-${n.color}` : ''}`, dataset: { path: P(path) } }, rich(nodeText(n, lang)));
+      return el('div', { class: `n-block n-p ${colorClass(n.color)}`, dataset: { path: P(path) } }, rich(nodeText(n, lang)));
     case 'heading':
-      return el('div', { class: `n-block n-h n-h${n.level}`, dataset: { path: P(path) } }, rich(nodeText(n, lang)));
+      return el('div', { class: `n-block n-h n-h${n.level} ${colorClass(n.color)}`, dataset: { path: P(path) } }, rich(nodeText(n, lang)));
+    case 'embed':
+      return el('div', { class: 'n-block n-embed', dataset: { path: P(path) } },
+        el('span', { class: 'n-embed-kind' }, EMBED_KIND[n.kind] ?? '링크'),
+        el('a', { href: n.url, target: '_blank', rel: 'noopener noreferrer' }, n.url));
     case 'bulleted': return list('ul', n.items, path);
     case 'numbered': return list('ol', n.items, path);
     case 'divider': return el('hr', { class: 'n-block n-divider', dataset: { path: P(path) } });
@@ -111,20 +122,26 @@ function renderNode(doc, n, path, ctx) {
     }
     case 'step': {
       const t = ctx.tl.steps.get(n.id);
-      const sub = (field, key, content, empty = '') => el('div', { class: 'n-sub', dataset: { path: P([...path, field]) } },
-        el('div', { class: 'n-h n-h3' }, chromeText(key, lang)),
-        content ?? el('div', { class: 'n-p n-empty' }, empty));
+      // 소제목(고정 문구)과 내용은 따로 누른다 — 소제목을 누르면 그 글자를, 내용을 누르면 내용을 고친다.
+      const sub = (field, content, empty = '') => el('div', { class: 'n-sub' },
+        el('div', { class: 'n-h n-h3 n-label', dataset: { path: P([...path, 'labels', STEP_LABELS[field]]) }, title: '소제목 고치기' },
+          labelText(doc, n, STEP_LABELS[field], lang)),
+        el('div', { class: 'n-sub-body', dataset: { path: P([...path, field]) } }, content ?? el('div', { class: 'n-p n-empty' }, empty)));
       const lines = (arr) => (arr?.length ? el('div', {}, arr.map((s) => el('div', { class: 'n-p' }, rich(s)))) : null);
+      const extra = (n.extra ?? []).map((c, i) => renderNode(doc, c, [...path, 'extra', i], ctx));
+      // 불러온 브리프에 원래 없던 칸 — 비워 두면 노션에도 안 올라간다.
+      const none = doc.origin === 'import' ? '(원본에 없음 — 눌러서 추가)' : null;
       return el('div', { class: 'n-block n-step' },
-        el('div', { class: 'n-h n-h3', dataset: { path: P(path) }, title: '스텝 전체 고치기' }, el('strong', {}, rich(stepTitle(n, t, lang)))),
+        el('div', { class: 'n-h n-h3', dataset: { path: P(path) }, title: '스텝 제목 고치기 · Claude 에게는 스텝 전체' }, el('strong', {}, rich(stepTitle(n, t, lang)))),
         el('div', { class: 'n-cols' },
           el('div', { class: 'n-col' }, slot({ ...n.image, displayLabel: `Step ${t?.index ?? ''} 참고 GIF` }, [...path, 'image'])),
           el('div', { class: 'n-col' },
-            sub('seconds', 'stepDuration', el('div', { class: 'n-p' }, t ? durationText(t, lang) : '')),
-            sub('action', 'stepAction', n.action?.length ? el('ul', { class: 'n-ul' }, n.action.map((s) => el('li', {}, rich(s)))) : null, '(비어 있음)'),
-            sub('visual', 'stepVisual', n.visual?.length ? el('ul', { class: 'n-ul' }, n.visual.map((s) => el('li', {}, rich(s)))) : null, '(비어 있음)'),
-            sub('subtitle', 'stepSubtitle', lines(n.subtitle), '(비어 있음)'),
-            sub('narration', 'stepNarration', lines(n.narration), '(없음 — 눌러서 추가)'))),
+            sub('seconds', el('div', { class: 'n-p' }, t ? durationText(t, lang) : '')),
+            sub('action', n.action?.length ? el('ul', { class: 'n-ul' }, n.action.map((s) => el('li', {}, rich(s)))) : null, none ?? '(비어 있음)'),
+            sub('visual', n.visual?.length ? el('ul', { class: 'n-ul' }, n.visual.map((s) => el('li', {}, rich(s)))) : null, none ?? '(비어 있음)'),
+            sub('subtitle', lines(n.subtitle), none ?? '(비어 있음)'),
+            sub('narration', lines(n.narration), none ?? '(없음 — 눌러서 추가)'),
+            ...extra)),
         el('hr', { class: 'n-divider' }));
     }
     case 'grid': {
@@ -132,29 +149,30 @@ function renderNode(doc, n, path, ctx) {
       const iPath = [...path, 'items'];
       gridRows(n).forEach((row, r) => {
         if (ctx.editable) wrap.append(gap(iPath, r * 2));
+        const im = n.images?.[r];
+        const from = r * 2 + 1;
+        const to = Math.min(r * 2 + 2, n.items.length);
+        const pic = im ? slot({ ...im, displayLabel: `${n.kind === 'dont' ? "Don'ts" : "Do's"} ${from}${to > from ? `–${to}` : ''} 예시 이미지` }, [...path, 'images', r]) : null;
+        // 불러온 브리프는 사진이 줄 위에 오기도 한다(imagesFirst) — 원본 순서 그대로.
+        if (pic && n.imagesFirst) wrap.append(pic);
         wrap.append(el('div', { class: 'n-cols' }, row.map((it) => {
           const { title, desc } = gridItemText(it, lang);
           return el('div', { class: 'n-col', dataset: { path: P([...iPath, it.index]) } },
             el('div', { class: 'n-h n-h3' }, rich(`${it.n}. ${title}`)),
-            el('div', { class: 'n-p' }, rich(desc)));
+            desc ? el('div', { class: 'n-p' }, rich(desc)) : null);
         }),
         row.length === 1 ? el('div', { class: 'n-col' }) : null));
-        const im = n.images?.[r];
-        if (im) {
-          const from = r * 2 + 1;
-          const to = Math.min(r * 2 + 2, n.items.length);
-          wrap.append(slot({ ...im, displayLabel: `${n.kind === 'dont' ? "Don'ts" : "Do's"} ${from}${to > from ? `–${to}` : ''} 예시 이미지` }, [...path, 'images', r]));
-        }
+        if (pic && !n.imagesFirst) wrap.append(pic);
       });
       if (ctx.editable) wrap.append(gap(iPath, n.items.length));
       return wrap;
     }
     case 'wordTable':
       return el('div', { class: 'n-block', dataset: { path: P(path) } },
-        el('div', { class: 'n-h n-h3' }, wordTableTitle(doc, lang)),
+        el('div', { class: 'n-h n-h3' }, wordTableTitle(doc, lang, n)),
         n.note ? el('div', { class: 'n-p' }, rich(n.note)) : null,
         el('div', { class: 'n-table-wrap' }, el('table', { class: 'n-table' }, el('tbody', {},
-          el('tr', { class: 'is-head' }, el('td', {}, chromeText('wordTableDont', lang)), el('td', {}, chromeText('wordTableInstead', lang))),
+          el('tr', { class: 'is-head' }, el('td', {}, labelText(doc, n, 'wordTableDont', lang)), el('td', {}, labelText(doc, n, 'wordTableInstead', lang))),
           n.rows.map((r) => el('tr', {}, el('td', {}, rich(r.dont)), el('td', {}, rich(r.instead))))))));
     default:
       return el('div', { class: 'n-block n-p n-empty' }, `(${n.type})`);

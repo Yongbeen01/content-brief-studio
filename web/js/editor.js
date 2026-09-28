@@ -53,8 +53,10 @@ export function createEditor({ root, getDoc, getSourceNotes, commit, isLocked, s
     const names = {
       action: '🩷 Action', visual: '👁 Visual', subtitle: '🔤 Subtitle', narration: '💬 Narration', seconds: '⏱ Time Duration(초)',
     };
+    if (pathArr[pathArr.length - 2] === 'labels') return '스텝 소제목';
     if (names[last]) return `스텝의 ${names[last]}`;
     if (v?.type === 'step') return '스텝 전체(제목·시간·모든 칸)';
+    if (v?.type === 'embed') return '링크(임베드)';
     if (v?.type === 'callout') return `${v.icon || ''} 박스 전체`;
     if (v?.type === 'table') return '표 전체';
     if (pathArr[pathArr.length - 2] === 'rows') return `표의 「${String(v?.[0] ?? '').slice(0, 30)}」 줄`;
@@ -87,6 +89,17 @@ export function createEditor({ root, getDoc, getSourceNotes, commit, isLocked, s
       wrap.className = 'edit-field';
       const label = document.createElement('label');
       label.textContent = f.label;
+      if (f.kind === 'check') {
+        const box = document.createElement('input');
+        box.type = 'checkbox';
+        box.dataset.key = f.key;
+        box.checked = f.value === '1';
+        label.htmlFor = box.id = `edit_field_${f.key}`;
+        wrap.className = 'edit-field is-check';
+        wrap.append(box, label);
+        fieldsBox.append(wrap);
+        continue;
+      }
       const input = document.createElement(f.kind === 'number' ? 'input' : 'textarea');
       input.dataset.key = f.key;
       if (f.kind === 'number') {
@@ -118,16 +131,18 @@ export function createEditor({ root, getDoc, getSourceNotes, commit, isLocked, s
   }
 
   function fieldValues() {
-    return [...fieldsBox.querySelectorAll('[data-key]')].map((e) => e.value);
+    return [...fieldsBox.querySelectorAll('[data-key]')].map((e) => (e.type === 'checkbox' ? (e.checked ? '1' : '') : e.value));
   }
 
   function setMode(next) {
     if (!target) return;
-    mode = target.direct ? next : 'ai';
+    mode = target.direct && (next === 'direct' || target.direct.aiOff) ? 'direct' : 'ai';
     tabDirect.classList.toggle('is-on', mode === 'direct');
     tabAi.classList.toggle('is-on', mode === 'ai');
     fieldsBox.classList.toggle('hidden', mode !== 'direct');
     aiBox.classList.toggle('hidden', mode === 'direct');
+    // 스텝 제목 줄·표 머리줄은 직접 고치기와 Claude 가 맡는 범위가 다르다(그 줄 ↔ 전체).
+    if (target.mode === 'edit') $('edit_pop_where').textContent = mode === 'direct' && target.direct?.where ? target.direct.where : describe(target.path);
     applyBtn.querySelector('.btn-text').textContent = mode === 'direct'
       ? (target.mode === 'edit' ? '저장' : '추가')
       : (target.mode === 'edit' ? '적용' : '추가');
@@ -155,6 +170,8 @@ export function createEditor({ root, getDoc, getSourceNotes, commit, isLocked, s
     tabDirect.textContent = t.mode === 'edit' ? '직접 고치기' : '직접 쓰기';
     tabDirect.disabled = !t.direct;
     tabDirect.title = t.direct ? '' : '여러 조각이 얽힌 자리라 Claude 에게 시켜야 합니다';
+    tabAi.disabled = !!t.direct?.aiOff;
+    tabAi.title = t.direct?.aiOff ? '짧은 고정 글이라 직접 고치면 됩니다' : '';
     renderFields(t.direct);
     const deletable = t.mode === 'edit' && typeof t.path[t.path.length - 1] === 'number';
     deleteBtn.classList.toggle('hidden', !deletable);
@@ -182,7 +199,8 @@ export function createEditor({ root, getDoc, getSourceNotes, commit, isLocked, s
   function applyDirect() {
     const t = target;
     const values = fieldValues();
-    if (!values.some((v) => String(v).trim())) {
+    const texts = values.filter((v, i) => t.direct.fields[i]?.kind !== 'check');
+    if (!texts.some((v) => String(v).trim())) {
       status.className = 'fx-status bad';
       status.textContent = t.mode === 'edit' ? '내용을 비울 수는 없습니다 — 지우려면 [삭제]를 누르세요.' : '넣을 내용을 적어 주세요.';
       return;
