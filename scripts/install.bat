@@ -15,11 +15,6 @@ type nul > "%~f0:Zone.Identifier" 2>nul
 set "PS=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
 if not exist "%PS%" set "PS=powershell.exe"
 
-REM Team settings from the admin's install package (cbs-team.env next to this
-REM file). install.ps1 copies it into the data folder; the app reads it on start.
-REM Passed as an environment variable so a non-ASCII folder path survives.
-if exist "%~dp0cbs-team.env" set "CBS_TEAM_ENV=%~dp0cbs-team.env"
-
 echo.
 echo   Content Brief Studio
 echo   Installing. This window shows the progress.

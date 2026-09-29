@@ -69,7 +69,7 @@ const DEFAULTS = {
 
   /**
    * kglowing 외부 API(구하다 게이트웨이) — 캠페인 목록·계정·업로드폼 링크.
-   * 키(X-API-KEY)는 팀 설정 코드 또는 설치 패키지의 cbs-team.env 로만 들어온다. 레포에는 없다.
+   * 키(X-API-KEY)는 화면 오른쪽 위 [Kglowing API] 에서 넣어 이 PC 의 config.json 에만 저장된다. 레포에는 없다.
    */
   externalApi: {
     baseUrl: 'https://api.kglowing.com/external-api',
@@ -116,7 +116,7 @@ function applyEnv(cfg) {
   if (process.env.CBS_NO_OPEN) cfg.openBrowserOnStart = false;
   // 개발·테스트 게시는 샌드박스 부모로 보낸다. 팀 공용 페이지를 더럽히지 않게.
   if (process.env.CBS_NOTION_PARENT) cfg.notion.parentPageId = normalizeId(process.env.CBS_NOTION_PARENT);
-  // 개발용 — 파일에 적지 않고 켤 때만 넣는다.
+  // 개발·시험용 — 파일에 적지 않고 켤 때만 넣는다. 있으면 화면에서 넣은 키보다 앞선다(팀원 PC 에는 없다).
   const apiKey = process.env.CBS_EXTERNAL_API_KEY || process.env.KGLOWING_EXTERNAL_API_KEY;
   if (apiKey) cfg.externalApi.key = apiKey.trim();
   return cfg;
@@ -161,49 +161,6 @@ export function saveUserConfig(patch) {
   for (const k of Object.keys(config)) delete config[k];
   Object.assign(config, merged);
   return config;
-}
-
-// ── 설치 패키지의 팀 설정 파일 ──────────────────────────────────────────────
-
-/** 설치 스크립트가 패키지의 cbs-team.env 를 여기로 옮겨 둔다. 켤 때 한 번 읽어 설정에 넣고 이름을 바꾼다. */
-export const TEAM_ENV_FILE = path.join(DATA_DIR, 'team.env');
-
-/** KEY=VALUE 줄들. #·빈 줄은 건너뛰고, 값의 앞뒤 따옴표는 뗀다. */
-export function parseEnv(text) {
-  const out = {};
-  for (const line of String(text ?? '').replace(/^﻿/, '').split(/\r?\n/)) {
-    const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
-    if (!m || line.trim().startsWith('#')) continue;
-    out[m[1]] = m[2].replace(/^(['"])(.*)\1$/, '$2');
-  }
-  return out;
-}
-
-/** 팀 설정 파일의 값 → 설정 조각. 모르는 이름은 버린다. */
-export function teamEnvPatch(env) {
-  const patch = {};
-  const notion = {};
-  if (env.NOTION_OAUTH_CLIENT_ID) notion.clientId = env.NOTION_OAUTH_CLIENT_ID.trim();
-  if (env.NOTION_OAUTH_CLIENT_SECRET) notion.clientSecret = env.NOTION_OAUTH_CLIENT_SECRET.trim();
-  if (env.NOTION_PARENT_PAGE_ID && normalizeId(env.NOTION_PARENT_PAGE_ID)) notion.parentPageId = normalizeId(env.NOTION_PARENT_PAGE_ID);
-  if (Object.keys(notion).length) patch.notion = notion;
-  const key = env.KGLOWING_EXTERNAL_API_KEY || env.X_API_KEY;
-  if (key) patch.externalApi = { key: key.trim() };
-  return patch;
-}
-
-/**
- * 켤 때 — 설치 패키지로 들어온 팀 설정 파일이 있으면 설정에 넣는다(팀 설정 코드를 붙여넣은 것과 같다).
- * 넣은 뒤에는 team.env.applied 로 이름을 바꾼다 — 나중에 새 패키지나 팀 설정 코드가 오면 그게 이긴다.
- * @returns {string[]} 넣은 항목(로그용, 값은 없음)
- */
-export function applyTeamEnvFile(file = TEAM_ENV_FILE) {
-  if (!fs.existsSync(file)) return [];
-  const patch = teamEnvPatch(parseEnv(fs.readFileSync(file, 'utf8')));
-  const applied = [...Object.keys(patch.notion ?? {}).map((k) => `notion.${k}`), ...(patch.externalApi ? ['externalApi.key'] : [])];
-  if (applied.length) saveUserConfig(patch);
-  fs.renameSync(file, `${file}.applied`);
-  return applied;
 }
 
 export function appVersion() {

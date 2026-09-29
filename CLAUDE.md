@@ -83,11 +83,11 @@ OAuth 연결 자체를 확인할 때만 설치본을 멈추고 4325 로 띄운�
   예전 초안의 `inputs.briefName` 은 있으면 그대로 따른다.
 - **필수 칸**: 캠페인(목록을 쓸 수 있을 때)·업로드폼·Account ID·사측 공유 파일(서버도 막는다)·소구점·컨셉.
   「필수: …」 문구는 없다 — 생성 버튼은 늘 눌리고, 누르면 빈 칸이 번쩍인다(`flashMissing`).
-- **팀 설정 = 설치 파일**(`npm run team-code`): 팀 설정 코드(CBS1, 이제 외부 API 키 `k` 도 싣는다)와 함께
-  `~/.content-brief-studio/team-package/content-brief-studio-install.zip`(install.bat + cbs-team.env + README.txt)을 만든다.
-  install.bat 은 옆의 cbs-team.env 경로를 `CBS_TEAM_ENV` 로 넘기고(한글 폴더 경로도 환경변수라 안전), install.ps1 이 데이터 폴더의
-  `team.env` 로 옮기며, 앱이 켤 때 `applyTeamEnvFile` 로 설정에 넣고 `team.env.applied` 로 이름을 바꾼다.
-  개발 중에는 `CBS_EXTERNAL_API_KEY` 환경변수로 키를 넣는다(파일에 적지 않는다).
+- **비밀값은 화면 오른쪽 위에서 넣는다**(2026-09-29 사용자 지시 — 설치 파일에 담아 자동 등록하던 방식은 되돌렸다):
+  노션 = [노션 설정] → 팀 설정 코드(CBS1, `npm run team-code`, 노션 정보만). Kglowing API = [Kglowing API] → X-API-KEY
+  (`POST /api/external-api/key` → `kglowing.setKey`: 캠페인 한 건으로 확인한 뒤 config.json 에 저장, 틀린 키는 저장 안 함, 빈 값=지우기).
+  버튼 상태 `externalApi = kglowing.status()`(끝 네 글자만). 키가 있는데 목록을 못 받으면 [Kglowing API 확인 필요].
+  개발·시험 때만 `CBS_EXTERNAL_API_KEY` 환경변수로 넣는다(파일에 적지 않는다, 있으면 화면 값보다 앞선다).
 - **레퍼런스 검색**(`src/brief/reference.js`, 문안은 `prompts.js REFERENCE_PROMPT` — CR팀이 준 글 그대로): 스텝 하나 → 틱톡 검색어 15개(sonnet).
   {{step}} 의 칸 이름은 문안이 부르는 [행동]·[화면]·[자막]·[내레이션]·[시간]으로 고정. [새로 고침]만 직전 키워드를 덧붙여 겹치지 않게 한다.
   - **틱톡 다운로더(확장 1.1+) 연결**(`web/js/tiktok-bridge.js`, 확장 쪽은 별도 프로젝트 `Documents\tiktok-video-downloader` 의

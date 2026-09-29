@@ -23,11 +23,10 @@ export class NotionAuthError extends Error {}
 
 // ── 팀 설정 코드 ────────────────────────────────────────────────────────────
 
-/** apiKey = kglowing 외부 API(X-API-KEY) — 캠페인 목록·업로드폼 링크. 키가 없던 옛 코드도 그대로 읽힌다. */
-export function encodeTeamCode({ clientId, clientSecret, parentPageId, apiKey }) {
+/** 노션 연결 정보만 싣는다. kglowing 외부 API 키는 화면 오른쪽 위 [Kglowing API] 에서 따로 넣는다. */
+export function encodeTeamCode({ clientId, clientSecret, parentPageId }) {
   const body = { i: String(clientId).trim(), s: String(clientSecret).trim() };
   if (parentPageId) body.p = normalizeId(parentPageId);
-  if (apiKey) body.k = String(apiKey).trim();
   return TEAM_CODE_PREFIX + Buffer.from(JSON.stringify(body), 'utf8').toString('base64url');
 }
 
@@ -41,16 +40,13 @@ export function decodeTeamCode(code) {
     throw new NotionAuthError('팀 설정 코드를 읽지 못했습니다. 잘리지 않았는지 확인해 주세요.');
   }
   if (!body?.i || !body?.s) throw new NotionAuthError('팀 설정 코드에 필요한 값이 없습니다.');
-  return {
-    clientId: body.i, clientSecret: body.s, parentPageId: body.p ? normalizeId(body.p) : '', apiKey: body.k ? String(body.k) : '',
-  };
+  return { clientId: body.i, clientSecret: body.s, parentPageId: body.p ? normalizeId(body.p) : '' };
 }
 
 export function applyTeamCode(code) {
-  const { clientId, clientSecret, parentPageId, apiKey } = decodeTeamCode(code);
+  const { clientId, clientSecret, parentPageId } = decodeTeamCode(code);
   const patch = { notion: { clientId, clientSecret } };
   if (parentPageId) patch.notion.parentPageId = parentPageId;
-  if (apiKey) patch.externalApi = { key: apiKey };
   saveUserConfig(patch);
   return { ok: true };
 }

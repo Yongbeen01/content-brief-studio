@@ -10,15 +10,17 @@
 
 ## 설치 (처음 한 번)
 
-1. 관리자에게 받은 **설치 파일(zip)** 을 풀고 **install.bat** 을 두 번 누릅니다.
-   zip 안의 `cbs-team.env` 에 팀 설정(노션 연결 정보·캠페인 조회 키)이 들어 있어 **팀 설정 코드를 붙여넣지 않아도 됩니다.**
-   이미 설치한 사람도 한 번 누르면 최신 버전과 팀 설정이 같이 들어갑니다(초안·아카이브는 그대로).
+1. 관리자에게 받은 **install.bat** 을 두 번 누릅니다(케비서 「프로그램 다운로드 센터」에서 설치해도 됩니다).
+   또는 PowerShell 에 이 한 줄:
+   ```powershell
+   irm https://raw.githubusercontent.com/Yongbeen01/content-brief-studio/main/scripts/install.ps1 | iex
+   ```
    관리자 권한이 필요 없습니다. Node·git·Claude Code 가 없으면 알아서 받습니다.
-   (zip 없이 PowerShell 한 줄 `irm https://raw.githubusercontent.com/Yongbeen01/content-brief-studio/main/scripts/install.ps1 | iex`
-   로 설치했다면, 앱에서 오른쪽 위 노션 버튼 → [팀 설정 코드 다시 넣기] 로 관리자에게 받은 `CBS1.` 코드를 넣습니다.)
 2. 설치 중에 **Claude 로그인** 창이 뜨면 브라우저에서 로그인합니다(Claude Pro/Max/Team 구독 필요).
-3. 앱이 열리면 오른쪽 위 **[노션 연결]** 을 누르고, 노션 승인 화면에서 **Contents Guidline** 페이지를 선택해 허용합니다
-   (노션 승인은 사람마다 한 번씩 필요합니다).
+3. 앱이 열리면 오른쪽 위 **[노션 설정]** → 관리자에게 받은 **팀 설정 코드**(`CBS1.`로 시작)를 붙여넣습니다.
+   이어서 뜨는 노션 승인 화면에서 **Contents Guidline** 페이지를 선택하고 허용합니다(사람마다 한 번).
+4. 오른쪽 위 **[Kglowing API]** → 관리자에게 받은 **X-API-KEY** 를 붙여넣고 [확인하고 저장]. 맞는 키인지 확인한 뒤 이 PC 에만 저장됩니다.
+   이 키가 있어야 캠페인 목록에서 Account ID·업로드폼 링크를 가져옵니다(없으면 두 칸을 직접 넣습니다).
 
 다음부터는 바탕화면의 **Content Brief Studio** 아이콘으로 엽니다. 새 버전은 30분마다 알아서 받습니다.
 
@@ -83,6 +85,8 @@
 - **"Claude 사용 한도에 걸렸습니다"** — 구독 한도입니다. 안내된 시각 뒤에 다시 하세요.
 - **노션에 만들기가 "권한이 없습니다"** — 노션 승인 때 Contents Guidline 을 선택하지 않은 것입니다.
   오른쪽 위 노션 버튼 → [다시 연결].
+- **캠페인 목록이 안 나온다 / [Kglowing API 확인 필요]** — 키가 없거나 바뀐 것입니다. 오른쪽 위 [Kglowing API] 에서 새 키를 넣으세요.
+  그동안은 업로드폼·Account ID 칸이 나타나니 직접 넣으면 됩니다.
 - **영상 기능을 처음 쓸 때** 영상 도구(ffmpeg·받아쓰기)를 한 번 내려받습니다(약 250MB, 1~2분).
   그다음부터는 바로 씁니다. 회사 네트워크가 GitHub 를 막으면 실패하니 그때는 알려 주세요.
 - **약 6개월마다** 노션 승인을 다시 해야 합니다(노션 정책).
@@ -97,20 +101,17 @@
 - **리디렉션 URI** 에 `http://localhost:4325/api/notion/oauth/callback` 을 **추가**(기존 URI 는 그대로)
 - **기능(Capabilities)** 에서 콘텐츠 읽기 + **콘텐츠 삽입(Insert content)** 켜기
 
-### 설치 파일(zip)·팀 설정 코드 만들기
+### 팀원에게 줄 것 두 가지
 
-```powershell
-npm run team-code
-```
+1. **팀 설정 코드**(노션 연결 정보) — `npm run team-code` 로 만듭니다.
+   ```powershell
+   npm run team-code
+   ```
+   client ID·secret 을 넣으면(시크릿은 화면에 안 보임, 이 PC 의 앱에 이미 있으면 Enter 로 그대로) `CBS1.…` 코드를 줍니다.
+   팀원은 앱 오른쪽 위 [노션 설정]에 붙여넣습니다.
+2. **Kglowing API 키**(X-API-KEY) — kglowing 외부 API 키 그대로. 팀원은 앱 오른쪽 위 [Kglowing API]에 붙여넣습니다.
 
-노션 client ID·secret 과 **kglowing 외부 API 키(X-API-KEY)** 를 넣으면(시크릿은 화면에 안 보임, 이 PC 의 앱에 이미 있으면 Enter 로 그대로)
-두 가지를 만듭니다.
-
-- **설치 파일** `%USERPROFILE%\.content-brief-studio\team-package\content-brief-studio-install.zip` — install.bat + cbs-team.env + README.txt.
-  팀원은 풀어서 install.bat 만 누르면 됩니다(설치 스크립트가 cbs-team.env 를 데이터 폴더로 옮기고, 앱이 켤 때 읽어 넣습니다).
-- **팀 설정 코드** `CBS1.…` — 이미 설치한 사람이 앱의 [팀 설정 코드 다시 넣기]로 붙여넣는 한 줄(외부 API 키 포함).
-
-둘 다 비밀값이 들어 있으니 **슬랙 DM 처럼 비공개로만** 전달하세요. 외부 API 키가 없으면 캠페인 목록 대신 업로드폼·Account ID 를 직접 넣는 칸이 나옵니다.
+둘 다 비밀값이니 **슬랙 DM 처럼 비공개로만** 전달하세요. 레포·공개 채널에 올리지 마세요.
 
 ### 안전장치
 

@@ -161,7 +161,7 @@ async function handleApi(req, res, url) {
       update: updateStatus(),
       models: config.models,
       media: toolsStatus(),
-      externalApi: { configured: kglowing.isConfigured() },
+      externalApi: kglowing.status(),
     });
   }
 
@@ -253,7 +253,16 @@ async function handleApi(req, res, url) {
   if (m === 'POST' && p === '/api/team-code') {
     const body = await readJson(req);
     oauth.applyTeamCode(body.code);
-    return json(res, 200, { notion: notionState(), externalApi: { configured: kglowing.isConfigured() } });
+    return json(res, 200, { notion: notionState() });
+  }
+  // 화면 오른쪽 위 [Kglowing API] — 키를 확인한 뒤 저장한다(빈 값 = 지우기).
+  if (m === 'POST' && p === '/api/external-api/key') {
+    const body = await readJson(req);
+    try {
+      return json(res, 200, { externalApi: await kglowing.setKey(body.key) });
+    } catch (e) {
+      return json(res, e.status && e.status < 500 ? 400 : 502, { error: e.message });
+    }
   }
   if (m === 'POST' && p === '/api/notion/connect') return json(res, 200, { url: oauth.authorizeUrl() });
   if (m === 'POST' && p === '/api/notion/disconnect') { oauth.disconnect(); return json(res, 200, { notion: notionState() }); }

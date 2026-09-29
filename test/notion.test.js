@@ -272,7 +272,7 @@ test('팀 설정 코드 · OAuth 교환과 갱신', async () => {
   const code = oauth.encodeTeamCode({ clientId: 'cid', clientSecret: 'sec', parentPageId: PARENT });
   assert.match(code, /^CBS1\./);
   assert.deepEqual(oauth.decodeTeamCode(code), {
-    clientId: 'cid', clientSecret: 'sec', parentPageId: PARENT, apiKey: '',
+    clientId: 'cid', clientSecret: 'sec', parentPageId: PARENT,
   });
   assert.throws(() => oauth.decodeTeamCode('nope'), /CBS1/);
   oauth.applyTeamCode(code);

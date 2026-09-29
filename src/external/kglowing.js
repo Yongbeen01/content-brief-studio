@@ -1,4 +1,4 @@
-import { config } from '../config.js';
+import { config, saveUserConfig } from '../config.js';
 import { accountValue, ACCOUNT_ID_RE } from '../../web/js/account.js';
 
 /**
@@ -28,27 +28,36 @@ export class ExternalApiError extends Error {
 
 export const isConfigured = () => !!String(config.externalApi?.key ?? '').trim();
 
-async function get(path, { signal } = {}) {
-  if (!isConfigured()) throw new ExternalApiError('외부 API 키가 없습니다 — 관리자에게 받은 설치 파일을 다시 실행하거나 팀 설정 코드를 넣어 주세요.', 412);
+/** 개발·시험용 환경변수로 들어온 키인가 — 그때는 화면에서 바꿔도 환경변수가 앞선다. */
+const fromEnv = () => !!(process.env.CBS_EXTERNAL_API_KEY || process.env.KGLOWING_EXTERNAL_API_KEY);
+
+/** 화면 오른쪽 위 [Kglowing API] 버튼이 보는 상태. 키는 끝 네 글자만 보여 준다(어느 키인지 알아볼 만큼만). */
+export function status() {
+  const key = String(config.externalApi?.key ?? '').trim();
+  return { configured: !!key, hint: key ? `••••${key.slice(-4)}` : '', fromEnv: fromEnv() };
+}
+
+async function get(path, { signal, key = config.externalApi?.key } = {}) {
+  if (!String(key ?? '').trim()) throw new ExternalApiError('Kglowing API 키가 없습니다 — 오른쪽 위 [Kglowing API] 에 넣어 주세요.', 412);
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
   signal?.addEventListener?.('abort', () => ctl.abort(), { once: true });
   let res;
   try {
     res = await fetch(`${config.externalApi.baseUrl.replace(/\/+$/, '')}${path}`, {
-      headers: { accept: 'application/json', 'X-API-KEY': config.externalApi.key.trim() },
+      headers: { accept: 'application/json', 'X-API-KEY': String(key).trim() },
       signal: ctl.signal,
     });
   } catch (e) {
-    throw new ExternalApiError(ctl.signal.aborted ? '외부 API 응답이 늦습니다. 잠시 뒤 다시 시도해 주세요.' : `외부 API 에 연결하지 못했습니다 — ${e.message}`);
+    throw new ExternalApiError(ctl.signal.aborted ? 'Kglowing API 응답이 늦습니다. 잠시 뒤 다시 시도해 주세요.' : `Kglowing API 에 연결하지 못했습니다 — ${e.message}`);
   } finally {
     clearTimeout(timer);
   }
-  if (res.status === 401 || res.status === 403) throw new ExternalApiError('외부 API 키가 맞지 않습니다 — 관리자에게 새 설치 파일을 받아 주세요.', res.status);
-  if (!res.ok) throw new ExternalApiError(`외부 API 오류 (${res.status})`, res.status);
+  if (res.status === 401 || res.status === 403) throw new ExternalApiError('Kglowing API 키가 맞지 않습니다 — 오른쪽 위 [Kglowing API] 에서 다시 넣어 주세요.', res.status);
+  if (!res.ok) throw new ExternalApiError(`Kglowing API 오류 (${res.status})`, res.status);
   const body = await res.json().catch(() => null);
   if (!body || (body.result && String(body.result).toUpperCase() !== 'SUCCESS' && !body.data)) {
-    throw new ExternalApiError(`외부 API 오류 — ${body?.message ?? '응답을 읽지 못했습니다'}`);
+    throw new ExternalApiError(`Kglowing API 오류 — ${body?.message ?? '응답을 읽지 못했습니다'}`);
   }
   return body.data ?? {};
 }
@@ -218,6 +227,23 @@ export async function campaignInfo(id) {
         : form.placeholderOnly ? '이 캠페인 메일은 업로드폼 링크를 {{google_form_url}} 로만 적고 있어 링크를 찾지 못했습니다'
           : '이 캠페인 메일 템플릿에 업로드폼 링크가 없습니다',
   };
+}
+
+/**
+ * 화면 [Kglowing API] 에서 넣은 키를 저장한다. 저장하기 전에 캠페인 한 건을 받아 보아 맞는 키인지 확인한다 —
+ * 틀린 키를 저장해 두면 캠페인 칸이 조용히 비어 원인을 찾기 어렵다. 빈 값이면 지운다.
+ * 이 PC 의 ~/.content-brief-studio/config.json 에만 저장된다.
+ */
+export async function setKey(raw) {
+  const key = String(raw ?? '').trim();
+  if (key) {
+    if (/\s/.test(key)) throw new ExternalApiError('키에 띄어쓰기가 들어 있습니다 — 받은 값을 그대로 붙여넣어 주세요.', 400);
+    await get('/api/v1/seeding/campaigns?page=0&size=1', { key });
+  }
+  saveUserConfig({ externalApi: { key } });
+  resetCache();
+  if (key) listCampaigns().catch(() => {}); // 드롭다운을 열 때 기다리지 않게 미리 받는다
+  return status();
 }
 
 /** 테스트용 */

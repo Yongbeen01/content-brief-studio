@@ -130,6 +130,7 @@ label {
 /* ── 입력칸: 연한 회색 바탕 + 조금 진한 회색 테두리 ─────── */
 input[type="text"],
 input[type="url"],
+input[type="password"],
 textarea,
 select {
   width: 100%;

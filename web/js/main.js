@@ -56,6 +56,8 @@ const state = {
   campaigns: { configured: null, list: [], error: '', loadedAt: 0 },
   /** 고른 캠페인의 계정·업로드폼을 가져오는 중 */
   campaignLoading: false,
+  /** Kglowing API 키 상태 { configured, hint(끝 네 글자), fromEnv } — 오른쪽 위 버튼 */
+  externalApi: {},
 };
 
 const isImport = () => state.draft?.mode === 'import';
@@ -294,7 +296,7 @@ function renderCampaign() {
   const loading = api.configured === null;
   const mode = campaignMode();
   const placeholder = loading ? '캠페인을 불러오는 중…'
-    : api.configured === false ? '팀 설정이 필요합니다'
+    : api.configured === false ? 'Kglowing API 키가 필요합니다'
       : api.error ? '캠페인 목록을 불러오지 못했습니다'
         : '캠페인을 고르세요';
   picker.setList(api.list, { disabled: !mode || state.busy, placeholder });
@@ -303,7 +305,7 @@ function renderCampaign() {
   const hint = $('campaign_hint');
   hint.classList.toggle('warn', !loading && !mode);
   hint.textContent = api.configured === false
-    ? '캠페인 목록을 쓰려면 팀 설정(외부 API 키)이 필요합니다 — 관리자에게 받은 설치 파일의 install.bat 을 한 번 다시 실행하거나, 오른쪽 위 노션 버튼 → [팀 설정 코드 다시 넣기]. 그동안은 아래 칸에 직접 넣어 주세요.'
+    ? '캠페인 목록을 쓰려면 오른쪽 위 [Kglowing API] 에 관리자에게 받은 키를 넣어 주세요. 그동안은 아래 칸에 직접 넣어 주세요.'
     : api.error ? `${api.error} 그동안은 아래 칸에 직접 넣어 주세요.`
       : '고르면 Account ID 와 업로드폼 링크를 캠페인 정보에서 가져옵니다.';
 
@@ -351,6 +353,7 @@ async function loadCampaigns({ fresh = false } = {}) {
   }
   renderCampaign();
   refreshFormState();
+  paintKglowing(); // 키가 있는데 목록을 못 받았으면 버튼에 알린다
 }
 
 /** 캠페인을 골랐다 — 목록에 있는 계정은 바로, 업로드폼은 캠페인 메일을 읽어 채운다. */
@@ -1202,13 +1205,41 @@ function paintNotion() {
   $('env_badge').textContent = sandbox ? `테스트 부모 페이지 ${n.parentPageId.slice(0, 8)}…` : '';
 }
 
+/**
+ * 오른쪽 위 [Kglowing API] — 키가 없으면 파란 버튼, 있으면 초록 점.
+ * 키가 있는데 캠페인 목록을 못 받았으면(키가 바뀌었거나 막힘) 빨간 점으로 알린다.
+ */
+function paintKglowing() {
+  const k = state.externalApi ?? {};
+  const btn = $('kg_btn');
+  const dot = btn.querySelector('.dot');
+  const t = btn.querySelector('.t');
+  btn.classList.remove('is-primary');
+  if (!k.configured) {
+    dot.className = 'dot bad';
+    t.textContent = 'Kglowing API';
+    btn.classList.add('is-primary');
+    btn.title = '캠페인 목록을 불러올 kglowing 외부 API 키를 넣습니다';
+  } else if (state.campaigns.error) {
+    dot.className = 'dot bad';
+    t.textContent = 'Kglowing API 확인 필요';
+    btn.title = state.campaigns.error;
+  } else {
+    dot.className = 'dot ok';
+    t.textContent = 'Kglowing API';
+    btn.title = `저장된 키 ${k.hint} — 눌러서 바꾸거나 지우기`;
+  }
+}
+
 async function refreshState() {
   try {
     const s = await api('GET', '/api/state');
     state.claude = s.claude;
     state.notion = s.notion;
+    state.externalApi = s.externalApi ?? {};
     paintClaude();
     paintNotion();
+    paintKglowing();
     return s;
   } catch {
     return null;
@@ -1283,10 +1314,49 @@ async function saveTeamCode() {
     paintNotion();
     $('team_code').value = '';
     $('team_dialog').close();
-    // 새 팀 설정 코드에는 외부 API 키가 들어 있을 수 있다 — 캠페인 목록을 다시 받는다.
-    loadCampaigns({ fresh: true });
     await connectNotion();
   } catch (e) { setStatus('team_status', e.message, 'bad'); }
+}
+
+// ── Kglowing API 키 ─────────────────────────────────────────────────────────
+
+function kgClick() {
+  const k = state.externalApi ?? {};
+  const kv = $('kg_kv');
+  kv.replaceChildren(
+    ...kvRow('저장된 키', k.configured ? k.hint : '없음'),
+    ...kvRow('캠페인 목록', !k.configured ? '키를 넣으면 불러옵니다'
+      : state.campaigns.error ? state.campaigns.error
+        : `${state.campaigns.list.length}개`),
+  );
+  $('kg_key').value = '';
+  $('kg_clear').classList.toggle('hidden', !k.configured);
+  setStatus('kg_status', k.fromEnv ? '개발용 환경변수로 들어온 키입니다 — 여기서 바꿔도 환경변수가 앞섭니다.' : '', k.fromEnv ? 'warn' : '');
+  openDialog('kg_dialog');
+  $('kg_key').focus();
+}
+
+/** 넣은 키를 서버가 캠페인 한 건으로 확인한 뒤 저장한다(빈 값 = 지우기). */
+async function saveKglowingKey(key) {
+  const btn = $('kg_save');
+  btn.disabled = true;
+  btn.classList.add('is-loading');
+  $('kg_clear').disabled = true;
+  setStatus('kg_status', key ? '맞는 키인지 확인하는 중…' : '지우는 중…', 'busy');
+  try {
+    const r = await api('POST', '/api/external-api/key', { key });
+    state.externalApi = r.externalApi;
+    $('kg_dialog').close();
+    toast(key ? 'Kglowing API 키를 저장했습니다 — 캠페인 목록을 불러옵니다' : 'Kglowing API 키를 지웠습니다');
+    await loadCampaigns({ fresh: !!key });
+  } catch (e) {
+    setStatus('kg_status', e.message, 'bad');
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove('is-loading');
+    $('kg_clear').disabled = false;
+    paintKglowing();
+  }
 }
 
 // ── 게시 ────────────────────────────────────────────────────────────────────
@@ -1834,6 +1904,17 @@ function wire() {
   $('publish_go').addEventListener('click', doPublish);
   $('claude_btn').addEventListener('click', () => claudeClick().catch((e) => toast(e.message, true)));
   $('notion_btn').addEventListener('click', notionClick);
+  $('kg_btn').addEventListener('click', kgClick);
+  $('kg_save').addEventListener('click', () => {
+    const key = $('kg_key').value.trim();
+    if (!key) return setStatus('kg_status', '키를 붙여넣어 주세요', 'bad');
+    return saveKglowingKey(key);
+  });
+  $('kg_key').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) $('kg_save').click(); });
+  $('kg_clear').addEventListener('click', () => {
+    // eslint-disable-next-line no-alert
+    if (window.confirm('저장된 Kglowing API 키를 지울까요? 캠페인 목록 대신 업로드폼·Account ID 를 직접 넣게 됩니다.')) saveKglowingKey('');
+  });
   $('team_save').addEventListener('click', saveTeamCode);
   $('team_code').addEventListener('keydown', (e) => { if (e.key === 'Enter') saveTeamCode(); });
   $('notion_disconnect').addEventListener('click', async () => {

@@ -20,6 +20,8 @@
       <div class="fx-head-actions">
         <button type="button" class="fx-topbar-btn" id="claude_btn"><span class="dot"></span><span class="t">Claude 확인 중…</span></button>
         <button type="button" class="fx-topbar-btn" id="notion_btn"><span class="dot"></span><span class="t">노션 확인 중…</span></button>
+        <!-- kglowing 외부 API 키 — 캠페인 목록·Account ID·업로드폼 링크를 가져올 때 쓴다 -->
+        <button type="button" class="fx-topbar-btn" id="kg_btn"><span class="dot"></span><span class="t">Kglowing API</span></button>
       </div>
     </header>
 
@@ -220,12 +222,30 @@
       <button type="button" class="fx-overlay-close" data-close aria-label="닫기"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
     </div>
     <div class="fx-overlay-body">
-      <p class="fx-help">노션에 페이지를 만들고 캠페인 목록을 불러오려면 <b>팀 설정</b>이 필요합니다. 관리자에게 받은 <code>CBS1.</code> 로 시작하는 한 줄을 붙여넣어 주세요. 이 코드는 이 PC 에만 저장됩니다.
-        <br>관리자에게 받은 설치 파일(zip)의 <b>install.bat</b> 을 한 번 누르면 이 코드 없이도 들어갑니다.</p>
+      <p class="fx-help">노션에 페이지를 만들려면 먼저 <b>팀 설정 코드</b>가 필요합니다. 관리자에게 받은 <code>CBS1.</code> 로 시작하는 한 줄을 붙여넣어 주세요. 이 코드는 이 PC 에만 저장됩니다.</p>
       <input type="text" id="team_code" autocomplete="off" spellcheck="false" placeholder="CBS1.…">
       <p class="fx-status" id="team_status"></p>
     </div>
     <div class="fx-overlay-foot"><button type="button" class="primary-btn" id="team_save">저장하고 노션 연결하기</button></div>
+  </dialog>
+
+  <!-- Kglowing API 키 — 넣으면 확인한 뒤 이 PC 에 저장한다 -->
+  <dialog class="fx-overlay fx-modal" id="kg_dialog">
+    <div class="fx-overlay-head">Kglowing API <span class="fx-spacer"></span>
+      <button type="button" class="fx-overlay-close" data-close aria-label="닫기"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    </div>
+    <div class="fx-overlay-body">
+      <p class="fx-help">캠페인 목록과, 고른 캠페인의 <b>Account ID</b>·<b>업로드폼 링크</b>를 kglowing 외부 API 에서 가져옵니다. 관리자에게 받은 <b>X-API-KEY</b> 를 붙여넣고 저장하세요. 저장하기 전에 맞는 키인지 확인하고, 이 PC 에만 저장합니다.</p>
+      <dl class="kv" id="kg_kv"></dl>
+      <input type="password" id="kg_key" autocomplete="off" spellcheck="false" placeholder="X-API-KEY 붙여넣기">
+      <p class="fx-status" id="kg_status"></p>
+    </div>
+    <div class="fx-overlay-foot">
+      <div class="fx-overlay-actions">
+        <button type="button" class="secondary-btn" id="kg_clear">키 지우기</button>
+        <button type="button" class="primary-btn" id="kg_save"><span class="btn-text">확인하고 저장</span><span class="loader"></span></button>
+      </div>
+    </div>
   </dialog>
 
   <!-- 노션 연결 정보 -->

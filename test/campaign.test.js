@@ -79,7 +79,7 @@ test('Account ID — 변형·조각을 걸러 실제 계정만, 브랜드 계정
 test('캠페인 목록·정보 — 키 헤더, 버린 캠페인 빼기, 진행 중이 위, 업로드폼은 메일에서', async () => {
   kg.resetCache();
   assert.equal(kg.isConfigured(), false);
-  await assert.rejects(kg.listCampaigns(), /외부 API 키가 없습니다/);
+  await assert.rejects(kg.listCampaigns(), /Kglowing API 키가 없습니다/);
 
   cfg.saveUserConfig({ externalApi: { key: 'test-key-123' } });
   assert.equal(kg.isConfigured(), true);
@@ -149,33 +149,50 @@ test('캠페인 목록 — 5분이 지나면 가진 목록을 바로 주고 뒤�
   }
 });
 
-// ── 팀 설정 — 코드와 설치 패키지의 cbs-team.env ────────────────────────────
+// ── 설정 — 노션은 팀 설정 코드, Kglowing API 키는 화면 [Kglowing API] 에서 따로 ─────────────
 
-test('팀 설정 코드 — 외부 API 키를 싣고, 키 없는 옛 코드도 읽힌다', () => {
-  const code = encodeTeamCode({ clientId: 'cid', clientSecret: 'sec', apiKey: 'k-1' });
-  assert.deepEqual(decodeTeamCode(code), { clientId: 'cid', clientSecret: 'sec', parentPageId: '', apiKey: 'k-1' });
-  const old = encodeTeamCode({ clientId: 'cid', clientSecret: 'sec' });
-  assert.equal(decodeTeamCode(old).apiKey, '');
-  applyTeamCode(encodeTeamCode({ clientId: 'cid2', clientSecret: 'sec2', apiKey: 'k-2' }));
-  assert.equal(cfg.config.externalApi.key, 'k-2');
-  assert.equal(cfg.config.notion.clientId, 'cid2');
+test('팀 설정 코드는 노션 연결 정보만 — API 키는 건드리지 않는다', () => {
+  cfg.saveUserConfig({ externalApi: { key: 'keep-me' } });
+  const code = encodeTeamCode({ clientId: 'cid', clientSecret: 'sec' });
+  assert.deepEqual(decodeTeamCode(code), { clientId: 'cid', clientSecret: 'sec', parentPageId: '' });
+  applyTeamCode(code);
+  assert.equal(cfg.config.notion.clientId, 'cid');
+  assert.equal(cfg.config.externalApi.key, 'keep-me');
 });
 
-test('설치 패키지의 cbs-team.env — 켤 때 설정에 넣고 이름을 바꾼다', () => {
-  const env = cfg.parseEnv('﻿# 주석\r\nNOTION_OAUTH_CLIENT_ID=abc\r\nNOTION_OAUTH_CLIENT_SECRET="s e c"\r\nKGLOWING_EXTERNAL_API_KEY= key-3 \r\nUNKNOWN=1\r\n\r\n');
-  assert.deepEqual(env, {
-    NOTION_OAUTH_CLIENT_ID: 'abc', NOTION_OAUTH_CLIENT_SECRET: 's e c', KGLOWING_EXTERNAL_API_KEY: 'key-3', UNKNOWN: '1',
-  });
-  assert.deepEqual(cfg.teamEnvPatch(env), { notion: { clientId: 'abc', clientSecret: 's e c' }, externalApi: { key: 'key-3' } });
+test('[Kglowing API] 키 저장 — 캠페인 한 건으로 확인한 뒤 저장, 틀린 키는 저장하지 않는다, 빈 값은 지운다', async () => {
+  cfg.saveUserConfig({ externalApi: { key: '' } });
+  kg.resetCache();
+  assert.deepEqual(kg.status(), { configured: false, hint: '', fromEnv: false });
+  const real = globalThis.fetch;
+  const seen = [];
+  globalThis.fetch = async (url, init) => {
+    seen.push({ url: String(url), key: init.headers['X-API-KEY'] });
+    if (init.headers['X-API-KEY'] === 'good-key-1234') {
+      return { ok: true, status: 200, json: async () => ({ result: 'SUCCESS', data: { hasNext: false, campaigns: [] } }) };
+    }
+    return { ok: false, status: 401, json: async () => ({}) };
+  };
+  try {
+    await assert.rejects(kg.setKey('bad-key'), /키가 맞지 않습니다/);
+    assert.equal(kg.isConfigured(), false, '틀린 키는 저장하지 않는다');
+    await assert.rejects(kg.setKey('two words'), /띄어쓰기/);
 
-  fs.writeFileSync(cfg.TEAM_ENV_FILE, 'NOTION_OAUTH_CLIENT_ID=pkg\nNOTION_OAUTH_CLIENT_SECRET=pkgsec\nKGLOWING_EXTERNAL_API_KEY=pkgkey\n');
-  const applied = cfg.applyTeamEnvFile();
-  assert.deepEqual(applied, ['notion.clientId', 'notion.clientSecret', 'externalApi.key']);
-  assert.equal(cfg.config.externalApi.key, 'pkgkey');
-  assert.equal(cfg.config.notion.clientId, 'pkg');
-  assert.ok(!fs.existsSync(cfg.TEAM_ENV_FILE));
-  assert.ok(fs.existsSync(`${cfg.TEAM_ENV_FILE}.applied`));
-  assert.deepEqual(cfg.applyTeamEnvFile(), []); // 두 번 켜도 다시 넣지 않는다
+    const s = await kg.setKey('  good-key-1234 ');
+    assert.deepEqual(s, { configured: true, hint: '••••1234', fromEnv: false });
+    assert.equal(cfg.config.externalApi.key, 'good-key-1234');
+    assert.ok(seen.some((c) => c.url.includes('/api/v1/seeding/campaigns?page=0&size=1') && c.key === 'good-key-1234'));
+    // 설정 파일에 저장된다(이 PC 의 config.json)
+    const saved = JSON.parse(fs.readFileSync(path.join(process.env.CBS_DIR, 'config.json'), 'utf8'));
+    assert.equal(saved.externalApi.key, 'good-key-1234');
+
+    const cleared = await kg.setKey('');
+    assert.equal(cleared.configured, false);
+    await assert.rejects(kg.listCampaigns(), /\[Kglowing API\] 에 넣어 주세요/);
+  } finally {
+    globalThis.fetch = real;
+    kg.resetCache();
+  }
 });
 
 // ── 브리프 이름 — 생성 뒤 자동 ─────────────────────────────────────────────
