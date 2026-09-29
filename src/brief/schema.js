@@ -152,6 +152,12 @@ export const TRANSLATE = obj({ texts: { type: 'array', items: str, minItems: 1 }
 /** 노션에서 내보낸 PDF → 제목 + 구조 있는 마크다운(문법은 prompts.js importPdfSystem). */
 export const IMPORT_PDF = obj({ title: str, markdown: { type: 'string', minLength: 1 } });
 
+/** 레퍼런스 검색 — 틱톡 검색 키워드 15개. */
+export const REFERENCE_COUNT = 15;
+export const REFERENCE = obj({
+  keywords: { type: 'array', items: { type: 'string', minLength: 1 }, minItems: REFERENCE_COUNT, maxItems: REFERENCE_COUNT },
+});
+
 /** 추가 자리 종류 → 돌려받을 모양. */
 export const INSERT = {
   top: obj({ nodes: { type: 'array', items: TOP_NODE, minItems: 1, maxItems: 6 } }),

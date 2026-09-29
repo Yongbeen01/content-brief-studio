@@ -1,4 +1,5 @@
 import { gridItemText, imageSlots, stepTimeline } from './doc.js';
+import { accountIds, accountTag } from './account.js';
 
 /**
  * 문서가 지침(docs/brief-template-guide.md)의 "반드시" 항목을 지키는지 본다.
@@ -75,9 +76,9 @@ export function lintDoc(doc, { plain = (t) => String(t ?? '') } = {}) {
   const tags = plain(overviewRow(doc, 'Hashtag') ?? '').toLowerCase().split(/\s+/).filter((t) => t.startsWith('#'));
   if (slug && !tags.some((t) => isBrandTag(t, doc.meta?.brand))) warn(`해시태그에 브랜드 태그(#${slug})가 없습니다`);
 
-  const account = String(doc.meta?.account ?? '').replace(/^@/, '');
+  const accounts = accountIds(doc.meta?.account);
   const tagRow = plain(overviewRow(doc, 'Account Tag') ?? '');
-  if (account && !tagRow.includes(`@${account}`)) warn(`Account Tag 가 입력한 계정(@${account})과 다릅니다`);
+  if (accounts.length && !accounts.every((id) => tagRow.includes(`@${id}`))) warn(`Account Tag 가 입력한 계정(${accountTag(accounts.join(' '))})과 다릅니다`);
 
   const steps = findAll(doc.nodes, (n) => n.type === 'step');
   if (!steps.length) warn('Essential Scenes 에 스텝이 없습니다');

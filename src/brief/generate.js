@@ -10,6 +10,7 @@ import { buildDoc, splitPoints } from './build.js';
 import { collectCandidates, pickProductImage } from './product-image.js';
 import { translateDoc } from './translate.js';
 import { lintDoc } from '../../web/js/lint.js';
+import { accountIds, badAccountIds } from '../../web/js/account.js';
 import { inline } from './inline.js';
 
 /**
@@ -34,8 +35,8 @@ export function validateInputs(inputs) {
   if (inputs?.uploadUrl && !url(inputs.uploadUrl)) errs.push('업로드폼 링크가 올바른 주소가 아닙니다');
   if (inputs?.tiktokUrl && !url(inputs.tiktokUrl)) errs.push('틱톡샵 링크가 올바른 주소가 아닙니다');
   if (inputs?.amazonUrl && !url(inputs.amazonUrl)) errs.push('아마존 링크가 올바른 주소가 아닙니다');
-  const acc = String(inputs?.accountId ?? '').replace(/^@+/, '');
-  if (acc && !/^[A-Za-z0-9._]{1,30}$/.test(acc)) errs.push('Account ID 에는 영문·숫자·밑줄·점만 쓸 수 있습니다');
+  if (String(inputs?.accountId ?? '').trim() && !accountIds(inputs.accountId).length) errs.push('Account ID 를 입력해 주세요');
+  if (badAccountIds(inputs?.accountId).length) errs.push('Account ID 에는 영문·숫자·밑줄·점만 쓸 수 있습니다');
   return errs;
 }
 

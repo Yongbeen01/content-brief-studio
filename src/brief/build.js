@@ -1,6 +1,7 @@
 import { brandSlug, isBrandTag, REQUIRED_DONTS } from '../../web/js/lint.js';
 import { stepImage, uid, withIds } from '../../web/js/doc.js';
 import { chromeText } from '../../web/js/chrome.js';
+import { accountTag, accountValue } from '../../web/js/account.js';
 
 /**
  * 작성 결과(Claude JSON) + 폼 입력 → 문서 트리.
@@ -99,7 +100,8 @@ export function headerLines({ uploadUrl, partnershipUrl, tiktokUrl, amazonUrl })
 export function buildDoc(c, inputs, ctx = {}) {
   const notes = [];
   const brand = String(c.brandName).trim();
-  const account = String(inputs.accountId ?? '').replace(/^@+/, '').trim();
+  // 계정이 여러 개면 'a, @b' — Account Tag 칸에는 '@a, @b' 로 들어간다.
+  const account = accountValue(inputs.accountId);
 
   const hashtags = normalizeHashtags(c.hashtags, brand);
   if (brandSlug(brand) && !(c.hashtags ?? []).some((t) => isBrandTag(t, brand))) {
@@ -141,7 +143,7 @@ export function buildDoc(c, inputs, ctx = {}) {
     rows: [
       ['Item', 'Content'],
       ['Hashtags', hashtags.join(' ')],
-      ['Account Tag', account ? `@${account}` : ''],
+      ['Account Tag', accountTag(account)],
       ['Caption', String(c.caption).trim()],
       ['Brand Pronunciation', String(c.pronunciation).trim()],
       ['Music', String(c.music).trim()],

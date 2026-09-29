@@ -1,7 +1,7 @@
 import { api, initSession, pollJob, sleep, uploadAsset } from './api.js';
 import { createInline } from './inline.js';
 import {
-  clone, docLang, docToMarkdown, fillAssets, getAt, imageSlots, keepAssets, setAt, uid,
+  clone, docLang, docToMarkdown, fillAssets, getAt, imageSlots, keepAssets, setAt, stepTimeline, stepTitle, uid,
 } from './doc.js';
 import { translateFromCache } from './translatable.js';
 import { lintDoc } from './lint.js';
@@ -9,6 +9,10 @@ import { renderDoc, setInline } from './preview.js';
 import { createEditor } from './editor.js';
 import { englishLabel, placeholderBlob, uploadImage } from './slots.js';
 import { createVideoPanel } from './video.js';
+import {
+  accountTag, accountValue, badAccountIds, formatAccountInput,
+} from './account.js';
+import * as notice from './notify.js';
 
 const $ = (id) => document.getElementById(id);
 const inline = createInline(window.markdownit);
@@ -37,6 +41,8 @@ const state = {
   importJob: null,
   /** 'ko' = 고치는 초안, 'en' = 노션에 올라갈 영어본(읽기 전용) */
   lang: 'ko',
+  /** 아카이브 목록(요약) — 새것이 앞 */
+  archive: [],
 };
 
 const isImport = () => state.draft?.mode === 'import';
@@ -92,6 +98,11 @@ function newDraft() {
     published: [],
     /** 옮겨 둔 영어 줄(「종류|한국어」 → 영어). 한 줄 고치면 그 줄만 다시 옮긴다. */
     enCache: {},
+    /**
+     * 이 초안의 기획서를 만든 생성 — { id(아카이브 기록), at, inputs, sourceIds }. 없으면 null.
+     * 있는 초안에서 [생성]을 다시 누르면 새 초안으로 갈라진다(앞의 기획서는 아카이브에 그대로 남는다).
+     */
+    generation: null,
   };
 }
 
@@ -114,12 +125,19 @@ function scheduleSave() {
   }, 600);
 }
 
+/** 기다리지 않고 지금 저장한다 — 다른 초안으로 넘어가기 직전에. */
+async function saveNow(draft = state.draft) {
+  if (draft === state.draft) clearTimeout(saveTimer);
+  await api('PUT', `/api/drafts/${draft.id}`, { draft });
+}
+
 // ── 폼 ──────────────────────────────────────────────────────────────────────
 
 function readForm() {
   const v = {};
   for (const [k, id] of Object.entries(FIELDS)) v[k] = $(id).value;
-  v.accountId = v.accountId.replace(/^@+/, '').trim();
+  // 계정 여러 개 — 'a, @b'. 방금 띄운 빈 자리는 뺀다.
+  v.accountId = accountValue(v.accountId);
   return v;
 }
 
@@ -131,8 +149,23 @@ function formProblems(v) {
   const missing = REQUIRED.filter((k) => !String(v[k] ?? '').trim()).map((k) => LABEL[k]);
   const bad = [];
   for (const k of ['uploadUrl', 'tiktokUrl', 'amazonUrl']) if (v[k].trim() && !isUrl(v[k].trim())) bad.push(`${LABEL[k]} 주소 형식`);
-  if (v.accountId && !/^[A-Za-z0-9._]{1,30}$/.test(v.accountId)) bad.push('Account ID(영문·숫자·밑줄·점만)');
+  if (badAccountIds(v.accountId).length) bad.push('Account ID(영문·숫자·밑줄·점만)');
   return { missing, bad };
+}
+
+/**
+ * Account ID 칸 — 띄어쓰기(쉼표·@ 도)를 치면 「, @」 가 붙어 다음 계정을 쓸 자리가 생긴다.
+ * 커서 앞 글자를 같은 규칙으로 정리한 길이만큼에 커서를 다시 둔다(가운데를 고쳐도 커서가 끝으로 튀지 않게).
+ */
+function formatAccountField(e) {
+  const acc = $('f_account');
+  const deleting = /^delete/.test(e?.inputType ?? '');
+  const next = formatAccountInput(acc.value, { deleting });
+  if (next === acc.value) return;
+  const caret = acc.selectionStart ?? acc.value.length;
+  const at = formatAccountInput(acc.value.slice(0, caret), { deleting }).length;
+  acc.value = next;
+  acc.setSelectionRange(Math.min(at, next.length), Math.min(at, next.length));
 }
 
 function refreshFormState() {
@@ -165,12 +198,12 @@ function refreshFormState() {
   if (missing.length) setStatus('form_status', `필수: ${missing.join(', ')}`, 'warn');
   else if (bad.length) setStatus('form_status', `확인해 주세요: ${bad.join(', ')}`, 'bad');
   else if (reading) setStatus('form_status', '사측 공유 파일을 읽는 중입니다 — 끝나면 생성할 수 있습니다', 'busy');
+  else if (state.draft.generation) setStatus('form_status', '다시 누르면 지금 입력으로 새로 만듭니다(지금 기획서는 아카이브에 그대로 남습니다)');
   else setStatus('form_status', state.draft.doc ? '다시 누르면 지금 입력으로 새로 만듭니다(지금 미리보기는 되돌리기로 살릴 수 있습니다)' : '');
 }
 
-function onFormInput() {
-  const acc = $('f_account');
-  if (/^@|\s/.test(acc.value)) acc.value = acc.value.replace(/^@+/, '').replace(/\s+/g, '');
+function onFormInput(e) {
+  if (e?.target?.id === 'f_account') formatAccountField(e);
   state.draft.inputs = readForm();
   refreshFormState();
   if (state.draft.doc) renderPreview(); // 제목은 브리프 이름을 따라간다
@@ -403,10 +436,10 @@ let videoPanel = null;
 function currentDoc() {
   const d = state.draft.doc;
   if (!d) return null;
-  const account = d.origin === 'import' ? '' : String(state.draft.inputs.accountId ?? '').replace(/^@+/, '').trim();
+  const account = d.origin === 'import' ? '' : accountValue(state.draft.inputs.accountId);
   const nodes = d.nodes.map((n) => {
     if (n.type !== 'table' || n.role !== 'overview' || !account) return n;
-    return { ...n, rows: n.rows.map((r) => (/^account tag/i.test(String(r[0])) ? [r[0], `@${account}`, ...r.slice(2)] : r)) };
+    return { ...n, rows: n.rows.map((r) => (/^account tag/i.test(String(r[0])) ? [r[0], accountTag(account), ...r.slice(2)] : r)) };
   });
   return {
     ...d,
@@ -587,7 +620,12 @@ async function generate() {
     $('claude_btn').focus();
     return;
   }
+  // 다 되면 소리·윈도우 알림으로 알린다 — 누른 이 순간에 소리를 켜 두고, 처음이면 알림을 허용할지 묻는다.
+  notice.prime();
   state.draft.inputs = inputs;
+  const sourceIds = [...state.draft.sourceIds];
+  // 이미 기획서를 만든 초안이면 결과는 새 초안으로 간다 — 앞의 기획서는 아카이브에 그대로 남는다.
+  const forkId = state.draft.generation ? uid() + uid() : null;
   const started = Date.now();
   $('progress_panel').classList.remove('hidden');
   $('progress_title').textContent = '기획서를 만들고 있습니다';
@@ -595,15 +633,22 @@ async function generate() {
   state.generateJob = 'starting';
   setBusy(true);
   $('generate_btn').querySelector('.btn-text').textContent = '생성 중…';
-  setStatus('form_status', 'Claude 가 쓰고 영어본까지 만들어 두는 동안 2분쯤 걸립니다. 창을 닫아도 앱은 계속 만듭니다.', 'busy');
+  const ask = notice.permission() === 'default' ? ' 브라우저가 알림을 물으면 [허용]을 눌러 주세요 — 다 되면 오른쪽 아래에 알려 드립니다.' : '';
+  setStatus('form_status', `Claude 가 쓰고 영어본까지 만들어 두는 동안 2분쯤 걸립니다. 창을 닫아도 앱은 계속 만들고, 결과는 아카이브에 남습니다.${ask}`, 'busy');
   const tick = setInterval(() => { $('progress_eta').textContent = fmtElapsed(Date.now() - started); }, 1000);
   try {
-    const { jobId } = await api('POST', '/api/generate', { inputs, sourceIds: state.draft.sourceIds });
+    const { jobId } = await api('POST', '/api/generate', {
+      inputs, sourceIds, draftId: forkId ?? state.draft.id, fromDraftId: state.draft.id,
+    });
     state.generateJob = jobId;
     const job = await pollJob(jobId, (j) => renderProgress(j, started));
     if (job.status === 'done') {
       const r = job.result;
+      if (forkId) forkDraft(forkId);
       commitDoc(r.doc);
+      state.draft.generation = {
+        id: r.archive?.id ?? '', at: r.archive?.at ?? Date.now(), inputs: clone(inputs), sourceIds,
+      };
       // 미리 만들어 둔 영어본 — [영어로 보기]가 기다림 없이 바로 나온다.
       mergeCache(r.enCache);
       if (r.docEn) {
@@ -615,15 +660,20 @@ async function generate() {
       state.draft.infos = r.infos ?? [];
       renderPreview();
       scheduleSave();
-      $('progress_title').textContent = `다 만들었습니다 (${fmtElapsed(Date.now() - started)})`;
+      refreshArchive();
+      const took = fmtElapsed(Date.now() - started);
+      $('progress_title').textContent = `다 만들었습니다 (${took})`;
       $('progress_cancel').classList.add('hidden');
       setTimeout(() => $('progress_panel').classList.add('hidden'), 4000);
       toast('미리보기를 만들었습니다');
+      notice.notify('콘텐츠 브리프 생성 완료', `${inputs.briefName} · ${took} 걸렸습니다. 눌러서 확인하세요.`);
       $('doc_card').scrollIntoView({ behavior: 'smooth', block: 'start' });
     } else {
       $('progress_title').textContent = job.status === 'cancelled' ? '멈췄습니다' : '만들지 못했습니다';
       $('progress_cancel').classList.add('hidden');
       setStatus('form_status', job.error?.message ?? '실패했습니다', 'bad');
+      // 멈추기는 사람이 누른 것이라 알리지 않는다. 실패는 자리를 비운 사이에 났을 수 있어 알린다.
+      if (job.status === 'failed') notice.notify('기획서를 만들지 못했습니다', job.error?.message ?? '실패했습니다', { ok: false });
     }
   } catch (e) {
     $('progress_panel').classList.add('hidden');
@@ -637,10 +687,36 @@ async function generate() {
   }
 }
 
+/**
+ * 이미 기획서가 있는 초안에서 다시 만들었을 때 — 새 결과는 새 초안(id)으로 가고, 앞의 초안은 그때 입력 그대로 남긴다.
+ * 다음 생성을 위해 고친 폼이 앞 기획서의 기록을 덮지 않게 한다(아카이브에서 열면 그때 입력이 보여야 한다).
+ */
+function forkDraft(id) {
+  clearTimeout(saveTimer);
+  const old = state.draft;
+  const gen = old.generation;
+  const kept = {
+    ...old, mode: 'new', importSource: null, inputs: clone(gen.inputs), sourceIds: [...(gen.sourceIds ?? old.sourceIds)],
+  };
+  api('PUT', `/api/drafts/${kept.id}`, { draft: kept }).catch((e) => toast(`앞 기획서를 저장하지 못했습니다 — ${e.message}`, true));
+  state.draft = {
+    ...newDraft(),
+    id,
+    mode: old.mode,
+    inputs: { ...old.inputs },
+    sourceIds: [...old.sourceIds],
+    importSource: old.importSource,
+    enCache: { ...(old.enCache ?? {}) }, // 겹치는 줄은 다시 옮기지 않게
+  };
+  state.undo = [];
+}
+
 // ── 기존 브리프 불러오기 ────────────────────────────────────────────────────
 
 /** 불러온 글을 미리보기에 올린다. 제목은 원래 제목으로(바꾸려면 이름 칸에서). */
 function showImported(r) {
+  // 생성한 기획서가 있던 초안이면 새 초안으로 — 앞의 기획서는 아카이브에서 그대로 열린다.
+  if (state.draft.generation) forkDraft(uid() + uid());
   if (r.doc.title) {
     state.draft.inputs.briefName = r.doc.title;
     $('f_name').value = r.doc.title;
@@ -833,7 +909,7 @@ function pickFromPc() {
  */
 function onSlotClick(path, el) {
   const node = getAt(state.draft.doc, path) ?? {};
-  // 스텝의 참고 GIF 자리는 창을 띄우지 않는다 — 상자 안에서 [영상으로 GIF 생성]·[GIF 업로드] 로 끝낸다.
+  // 스텝의 참고 GIF 자리는 창을 띄우지 않는다 — 상자 안에서 [레퍼런스 검색]·[영상으로 자동 생성]·[GIF 업로드] 로 끝낸다.
   if (node.slot === 'step') return videoPanel.toggle(node.id);
   slotTarget = { path, el };
   const photos = sourcePhotos();
@@ -1153,11 +1229,283 @@ async function doPublish() {
   }
 }
 
+// ── 아카이브 ────────────────────────────────────────────────────────────────
+
+const two = (n) => String(n).padStart(2, '0');
+function fmtWhen(at) {
+  const d = new Date(at);
+  return `${d.getMonth() + 1}월 ${d.getDate()}일 ${two(d.getHours())}:${two(d.getMinutes())}`;
+}
+
+function renderArchive() {
+  const items = state.archive;
+  $('archive_count').textContent = items.length ? `${items.length}건` : '';
+  $('archive_count').classList.toggle('hidden', !items.length);
+  const list = $('archive_list');
+  if (!items.length) {
+    const empty = document.createElement('div');
+    empty.className = 'history-empty';
+    empty.textContent = '아직 생성한 기획서가 없습니다. [생성]이 끝날 때마다 그때의 입력과 결과가 여기에 쌓입니다.';
+    list.replaceChildren(empty);
+    return;
+  }
+  const current = state.draft?.generation?.id;
+  list.replaceChildren(...items.map((it) => {
+    const row = document.createElement('div');
+    row.className = `history-item${it.id === current ? ' active' : ''}`;
+    row.tabIndex = 0;
+    row.setAttribute('role', 'button');
+    row.dataset.archiveId = it.id;
+    const head = document.createElement('div');
+    head.className = 'history-item-header';
+    const title = document.createElement('div');
+    title.className = 'history-item-title';
+    title.textContent = it.title;
+    title.title = it.title;
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'history-delete-btn';
+    del.title = '아카이브에서 지우기';
+    del.setAttribute('aria-label', '아카이브에서 지우기');
+    del.textContent = '×';
+    del.addEventListener('click', (e) => { e.stopPropagation(); deleteArchive(it); });
+    head.append(title, del);
+    const meta = document.createElement('div');
+    meta.className = 'history-item-meta';
+    meta.textContent = [fmtWhen(it.at), it.brand, it.product, it.id === current ? '지금 보는 중' : ''].filter(Boolean).join(' · ');
+    row.append(head, meta);
+    row.addEventListener('click', () => openArchive(it.id));
+    row.addEventListener('keydown', (e) => { if (e.key === 'Enter') openArchive(it.id); });
+    return row;
+  }));
+}
+
+async function refreshArchive() {
+  try {
+    const { entries } = await api('GET', '/api/archive');
+    state.archive = entries ?? [];
+  } catch { /* 다음에 */ }
+  renderArchive();
+}
+
+/** 아카이브 기록 → 그 기록을 이어서 고칠 새 초안. */
+function draftFromEntry(entry, id) {
+  const sourceIds = (entry.sources ?? []).map((s) => s.id);
+  const base = newDraft();
+  return {
+    ...base,
+    id,
+    createdAt: entry.at,
+    mode: 'new',
+    inputs: { ...base.inputs, ...entry.inputs },
+    sourceIds,
+    doc: entry.doc,
+    docEn: entry.docEn ?? null,
+    docEnFrom: '',
+    enCache: entry.enCache ?? {},
+    sourceNotes: entry.sourceNotes ?? '',
+    warnings: entry.warnings ?? [],
+    infos: entry.infos ?? [],
+    generation: { id: entry.id, at: entry.at, inputs: { ...entry.inputs }, sourceIds },
+  };
+}
+
+/**
+ * 기록을 연다 — 그때 입력이 폼에, 만든 기획서가 미리보기에 들어온다.
+ * 그 기록을 이어서 고치던 초안이 있으면 그것을(고친 것까지) 연다. 없으면(만드는 동안 창을 닫았거나,
+ * 그 초안에서 다시 만들어 넘어갔으면) 기록으로 새 초안을 만든다.
+ */
+async function openArchive(id, { note = '아카이브에서 열었습니다' } = {}) {
+  if (state.busy || state.importJob || state.generateJob) return toast('지금 하는 작업이 끝난 뒤에 열어 주세요');
+  if (videoPanel?.busyCount()) return toast('영상에서 GIF 를 만드는 중입니다 — 끝난 뒤에 열어 주세요');
+  $('archive').open = false;
+  if (state.draft.generation?.id === id) return;
+  try {
+    await saveNow();
+    const { entry } = await api('GET', `/api/archive/${id}`);
+    let draft = entry.draftId ? (await api('GET', `/api/drafts/${entry.draftId}`)).draft : null;
+    let fresh = false;
+    if (!draft || draft.generation?.id !== entry.id) {
+      // [생성]만 누르고 창을 닫은 초안(아직 기획서가 없는 것)이면 그 자리에 채운다.
+      const reuse = entry.draftId && (!draft || (!draft.generation && !draft.doc));
+      draft = draftFromEntry(entry, reuse ? entry.draftId : uid() + uid());
+      if (!reuse) await api('PUT', `/api/archive/${id}`, { draftId: draft.id });
+      fresh = true;
+    } else {
+      // 이어서 고치던 초안이라도 폼은 그 생성 때 입력으로 — 다음 생성을 준비하며 고친 폼이 남아 있을 수 있다
+      // (만드는 동안 창을 닫으면 앞 초안에 새 입력이 저장된 채로 남는다). 미리보기는 고친 것 그대로.
+      draft.mode = 'new';
+      draft.inputs = { ...draft.inputs, ...clone(entry.inputs) };
+      draft.sourceIds = (entry.sources ?? []).map((s) => s.id);
+    }
+    await useDraft(draft);
+    // 기록에 든 영어본은 이 문서에서 나온 것이다 — [영어로 보기]가 기다림 없이 나오게.
+    if (fresh && state.draft.docEn) state.draft.docEnFrom = docStamp(currentDoc());
+    await saveNow(); // 이제 이 초안이 지금 초안이다(앱을 다시 켜도 여기서 시작)
+    toast(`${note} — ${entry.inputs?.briefName || entry.doc?.title || '(제목 없음)'}`);
+    $('doc_card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+/**
+ * 켤 때 — [생성]을 누르고 창을 닫았다가 다시 켰으면, 그사이 끝난 기획서를 바로 연다.
+ * 지금 초안에서 누른 생성이고(fromDraftId), 이 초안이 아직 그 결과를 모를 때만.
+ */
+async function resumeFinished() {
+  const e = state.archive[0];
+  if (!e?.fromDraftId || e.fromDraftId !== state.draft.id || state.draft.generation?.id === e.id) return;
+  try {
+    // 화면이 결과를 받았으면 그 초안에 이 생성이 적혀 있다 — 그러면 이미 본 것이다.
+    const { draft } = e.draftId ? await api('GET', `/api/drafts/${e.draftId}`) : { draft: null };
+    if (draft?.generation?.id === e.id) return;
+  } catch { return; }
+  await openArchive(e.id, { note: '창을 닫은 사이에 다 만든 기획서를 열었습니다' });
+}
+
+async function deleteArchive(it) {
+  // eslint-disable-next-line no-alert
+  if (!window.confirm(`이 기록을 아카이브에서 지울까요?\n${it.title}\n(노션에 만든 페이지는 그대로입니다)`)) return;
+  try {
+    await api('DELETE', `/api/archive/${it.id}`);
+    await refreshArchive();
+    toast('아카이브에서 지웠습니다');
+  } catch (e) { toast(e.message, true); }
+}
+
+// ── 레퍼런스 검색 ───────────────────────────────────────────────────────────
+
+/** 스텝 id → { key, keywords } — 같은 스텝을 다시 열면 기다림 없이 보여 준다. 스텝 글이 바뀌면 새로 받는다. */
+const refCache = new Map();
+/** 스텝 id → { key, promise } — 창을 닫았다 열어도 같은 요청을 두 번 보내지 않게. */
+const refJobs = new Map();
+let refTarget = null;
+
+/** 스텝 글·브랜드·제품이 같으면 같은 키(사진·id 는 빼고 본다 — GIF 를 넣었다고 새로 받을 필요는 없다). */
+function refKey(doc, step) {
+  const { id, image, labels, heading, ...rest } = step;
+  return docStamp({ rest, brand: doc.meta?.brand, product: doc.meta?.product });
+}
+
+function renderRef(keywords) {
+  const list = $('ref_list');
+  list.classList.remove('is-loading');
+  list.replaceChildren(...keywords.map((k, i) => {
+    const a = document.createElement('a');
+    a.href = `https://www.tiktok.com/search?q=${encodeURIComponent(k)}`;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.title = '틱톡 검색을 새 탭으로 엽니다';
+    const n = document.createElement('span');
+    n.className = 'ref-n';
+    n.textContent = String(i + 1);
+    const kw = document.createElement('span');
+    kw.className = 'ref-kw';
+    kw.textContent = k;
+    const go = document.createElement('span');
+    go.className = 'ref-go';
+    go.textContent = '틱톡에서 보기 ↗';
+    a.append(n, kw, go);
+    const li = document.createElement('li');
+    li.append(a);
+    return li;
+  }));
+}
+
+function fetchKeywords(doc, stepId, key, previous) {
+  const promise = (async () => {
+    const { jobId } = await api('POST', '/api/reference-keywords', { doc, stepId, previous });
+    const job = await pollJob(jobId);
+    if (job.status !== 'done') throw new Error(job.error?.message ?? '검색어를 만들지 못했습니다');
+    refCache.set(stepId, { key, keywords: job.result.keywords });
+    return job.result.keywords;
+  })();
+  refJobs.set(stepId, { key, promise });
+  promise.catch(() => {}).finally(() => { if (refJobs.get(stepId)?.promise === promise) refJobs.delete(stepId); });
+  return promise;
+}
+
+/** 지금 창의 스텝 검색어를 받아 보여 준다. again = [새로 고침](같은 기준으로 다시). */
+async function loadReference(again = false) {
+  const t = refTarget;
+  if (!t) return;
+  const cached = refCache.get(t.stepId);
+  let job = refJobs.get(t.stepId);
+  if (!job || job.key !== t.key || again) {
+    const previous = again && cached?.key === t.key ? cached.keywords : [];
+    job = { promise: fetchKeywords(currentDoc(), t.stepId, t.key, previous) };
+  }
+  const list = $('ref_list');
+  const btn = $('ref_refresh');
+  btn.disabled = true;
+  btn.classList.add('is-loading');
+  // 처음이면 목록 자리에 기다리는 줄, 새로 고침이면 지금 목록을 흐리게 두고 아래 줄에 알린다.
+  let wait = null;
+  if (list.querySelector('a')) list.classList.add('is-loading');
+  else {
+    const li = document.createElement('li');
+    li.className = 'ref-wait';
+    const spin = document.createElement('span');
+    spin.className = 'inline-loader';
+    wait = document.createTextNode('Claude 가 검색어를 만드는 중…');
+    li.append(spin, wait);
+    list.replaceChildren(li);
+  }
+  const started = Date.now();
+  const say = () => {
+    if (refTarget !== t) return;
+    const secs = Math.round((Date.now() - started) / 1000);
+    if (wait) wait.textContent = `Claude 가 검색어를 만드는 중…${secs ? ` ${secs}초` : ''}`;
+    else setStatus('ref_status', `같은 기준으로 새로 만드는 중…${secs ? ` ${secs}초` : ''}`, 'busy');
+  };
+  say();
+  const tick = setInterval(say, 1000);
+  try {
+    const keywords = await job.promise;
+    if (refTarget === t) {
+      renderRef(keywords);
+      setStatus('ref_status', keywords.length < 15 ? `겹치는 것을 빼고 ${keywords.length}개입니다.` : '');
+    }
+  } catch (e) {
+    if (refTarget === t) {
+      list.classList.remove('is-loading');
+      if (!list.querySelector('a')) list.replaceChildren();
+      setStatus('ref_status', e.message, 'bad');
+    }
+  } finally {
+    clearInterval(tick);
+    if (refTarget === t) {
+      btn.disabled = false;
+      btn.classList.remove('is-loading');
+    }
+  }
+}
+
+/** 스텝 참고 GIF 상자의 [레퍼런스 검색] — slotId 는 그 상자(사진 자리) id. */
+function openReference(slotId) {
+  const doc = currentDoc();
+  const step = (doc?.nodes ?? []).find((n) => n.type === 'step' && n.image?.id === slotId);
+  if (!step) return toast('이 스텝을 문서에서 찾지 못했습니다', true);
+  const tl = stepTimeline(doc).steps.get(step.id);
+  refTarget = { stepId: step.id, key: refKey(doc, step) };
+  $('ref_where').textContent = `「${inline.plain(stepTitle(step, tl, docLang(doc)))}」 장면이 담긴 틱톡 영상을 찾는 검색어입니다. 누르면 틱톡 검색이 새 탭으로 열립니다.`;
+  $('ref_list').replaceChildren();
+  setStatus('ref_status', '');
+  $('ref_refresh').disabled = false;
+  $('ref_refresh').classList.remove('is-loading');
+  openDialog('ref_dialog');
+  const hit = refCache.get(step.id);
+  if (hit && hit.key === refTarget.key) return renderRef(hit.keywords);
+  loadReference(false);
+}
+
 // ── 시작 ────────────────────────────────────────────────────────────────────
 
-async function loadDraft() {
-  const { draft } = await api('GET', '/api/drafts/current');
-  state.draft = draft ?? newDraft();
+/** 초안 하나를 화면에 올린다 — 켤 때·아카이브에서 열 때. */
+async function useDraft(draft) {
+  editor?.close();
+  state.draft = draft;
   state.draft.mode ??= 'new';
   state.draft.sourceIds ??= [];
   state.draft.importSource ??= null;
@@ -1165,6 +1513,10 @@ async function loadDraft() {
   state.draft.warnings ??= [];
   state.draft.infos ??= [];
   state.draft.enCache ??= {};
+  state.draft.generation ??= null;
+  state.undo = [];
+  state.lang = 'ko';
+  state.sources.clear();
   fillForm(state.draft.inputs);
   const ids = trackedSourceIds();
   if (ids.length) {
@@ -1177,12 +1529,21 @@ async function loadDraft() {
   renderSources();
   applyMode();
   renderPreview();
+  renderArchive();
+}
+
+async function loadDraft() {
+  const { draft } = await api('GET', '/api/drafts/current');
+  await useDraft(draft ?? newDraft());
 }
 
 function startNew() {
   if (state.busy || state.importJob) return;
+  const msg = state.draft.generation
+    ? '새 기획서를 시작할까요? 지금 기획서는 아카이브에서 다시 열 수 있습니다.'
+    : '지금 초안을 닫고 새 기획서를 시작할까요? (지금 초안은 저장돼 있습니다)';
   // eslint-disable-next-line no-alert
-  if (!window.confirm('지금 초안을 닫고 새 기획서를 시작할까요? (지금 초안은 저장돼 있습니다)')) return;
+  if (!window.confirm(msg)) return;
   state.draft = newDraft();
   state.undo = [];
   state.sources.clear();
@@ -1190,12 +1551,27 @@ function startNew() {
   renderSources();
   applyMode();
   renderPreview();
+  renderArchive();
   scheduleSave();
   $(isImport() ? 'i_link' : 'f_name').focus();
 }
 
 function wire() {
   for (const id of Object.values(FIELDS)) $(id).addEventListener('input', onFormInput);
+  // 칸을 떠나면 끝에 남은 빈 자리(「, @」)를 치운다.
+  $('f_account').addEventListener('blur', () => {
+    const acc = $('f_account');
+    const clean = accountValue(acc.value);
+    if (clean !== acc.value) acc.value = clean;
+  });
+
+  // 아카이브 — 펼칠 때마다 새로 읽는다(창을 닫은 사이에 끝난 생성도 보이게). 바깥을 누르면 접힌다.
+  const archive = $('archive');
+  archive.addEventListener('toggle', () => { if (archive.open) refreshArchive(); });
+  document.addEventListener('click', (e) => { if (archive.open && !archive.contains(e.target)) archive.open = false; });
+  archive.addEventListener('keydown', (e) => { if (e.key === 'Escape') archive.open = false; });
+
+  $('ref_refresh').addEventListener('click', () => loadReference(true));
   $('generate_btn').addEventListener('click', () => (isImport() ? runImport() : generate()));
   $('progress_cancel').addEventListener('click', async () => {
     const job = state.importJob ?? state.generateJob;
@@ -1266,6 +1642,7 @@ function wire() {
     getDraftId: () => state.draft.id,
     commit: (next) => commitDoc(next),
     toast,
+    onReference: openReference,
   });
 
   editor = createEditor({
@@ -1287,6 +1664,8 @@ function wire() {
     wire();
     await refreshState();
     await loadDraft();
+    await refreshArchive();
+    await resumeFinished();
     setInterval(refreshState, 30_000);
   } catch (e) {
     document.body.prepend(Object.assign(document.createElement('p'), { className: 'fx-status bad', textContent: `시작하지 못했습니다 — ${e.message}` }));

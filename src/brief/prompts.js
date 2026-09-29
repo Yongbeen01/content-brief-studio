@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT } from '../config.js';
+import { accountTag } from '../../web/js/account.js';
 
 /**
  * 프롬프트. 형식·어조의 정본은 docs/brief-template-guide.md 이고, 여기서는 그 문서를 **그대로**
@@ -81,11 +82,10 @@ function sourcesBlock(textSources, pdfSources) {
 }
 
 export function composeUser({ inputs, textSources = [], pdfSources = [], feedback = '' }) {
-  const account = String(inputs.accountId ?? '').replace(/^@+/, '');
   const stores = [inputs.tiktokUrl ? 'TikTok Shop' : '', inputs.amazonUrl ? 'Amazon' : ''].filter(Boolean);
   return `# Brief inputs
 - Brief name: ${inputs.briefName}
-- Creator account to tag: @${account}
+- Creator account(s) to tag: ${accountTag(inputs.accountId)}
 - Where the product is sold (links are added by the app): ${stores.length ? stores.join(', ') : 'not provided'}
 
 ## Selling points — MUST appear in the video and be emphasized (show it, subtitle it, say it)
@@ -210,6 +210,50 @@ ${hint ? `\n${hint}\n` : ''}
 ${instruction}
 
 Return only the new content to insert, as JSON, now.`;
+}
+
+// ── 레퍼런스 검색 ───────────────────────────────────────────────────────────
+
+/**
+ * 스텝 참고 영상을 틱톡에서 찾을 검색어. 사용자(CR팀)가 정한 문안 그대로다 — 기준을 바꾸려면 이 글을 고친다.
+ * {{brand}} · {{product}} · {{step}} 자리는 referenceUser 가 채운다.
+ */
+export const REFERENCE_PROMPT = `틱톡에서 레퍼런스 영상을 찾을 검색 키워드 15개를 만들어 주세요.
+찾으려는 영상은 아래 스텝의 행동·화면과 가장 비슷한 장면이 담긴 {{brand}} 제품 영상입니다.
+
+브랜드: {{brand}}
+제품: {{product}}
+스텝:
+{{step}}
+
+기준
+1. 모든 키워드에 브랜드명(틱톡에서 쓰는 영문 표기)을 우선적으로 넣습니다. 다른 브랜드나 브랜드가 없는 일반 키워드는 7개 이하로 생성해도 좋습니다.
+2. 가장 중요한 것은 행동입니다. 행동이 같으면 같은 브랜드의 다른 제품 영상이어도 됩니다. 그래서 키워드 일부는 제품명을 빼고 "브랜드 + 행동"으로 만듭니다.
+3. 키워드는 [행동]과 [화면]에서 뽑습니다. 자막과 내레이션은 어떤 행동인지 파악하는 데만 쓰고, 문장을 그대로 옮기지 않습니다. 시간은 무시합니다.
+4. 원하는 장면이 영상 중간에만 나와도 됩니다. 그런 장면이 들어 있을 만한 영상 형식(how to use, routine, review 등)으로 2~3개를 만듭니다.
+5. 스텝이 제품의 모습(라벨, 제품 전체 컷, 제형, 접사 등)을 요구하면 제품 클로즈업 영상을 찾는 키워드(close up, asmr, texture 등)를 3~4개 넣습니다. 요구하지 않으면 그 몫도 행동 키워드로 채웁니다.
+6. 틱톡 사용자가 실제로 검색할 만한 2~5단어의 영어 소문자로 씁니다. 반드시 영어로만 생성하고, 한글로 생성하지 않습니다.
+7. 단어 순서만 바꾸거나 단수·복수만 다른 중복 키워드는 만들지 않습니다.
+8. 행동이 가장 잘 맞는 키워드부터 순서대로 나열합니다.
+
+출력: keywords 배열에 키워드 문자열 15개만 담고, 설명은 쓰지 않습니다.`;
+
+export function referenceSystem() {
+  return 'You help a Korean brand team find reference videos on TikTok. '
+    + 'Follow the criteria in the request exactly and return only the JSON object in the provided schema.';
+}
+
+/**
+ * @param {{ brand:string, product:string, step:string, previous?:string[], feedback?:string }} o
+ *   previous = [새로 고침] 직전에 보여 준 키워드. 기준은 그대로 두고 표현만 새로 뽑게 한다.
+ */
+export function referenceUser({ brand, product, step, previous = [], feedback = '' }) {
+  const fill = { brand: brand || '(브랜드 모름)', product: product || '(제품명 모름)', step };
+  const body = REFERENCE_PROMPT.replace(/\{\{(\w+)\}\}/g, (m, k) => fill[k] ?? m);
+  const again = previous.length
+    ? `\n\n[새로 고침] 직전에 보여 준 키워드입니다. 위 기준은 그대로 지키되, 되도록 이 키워드들과 겹치지 않는 새 키워드로 만들어 주세요.\n${previous.map((k) => `- ${k}`).join('\n')}`
+    : '';
+  return `${body}${again}${feedback ? `\n\n고칠 점: ${feedback}` : ''}`;
 }
 
 // ── 기존 브리프 PDF 옮겨 적기 ───────────────────────────────────────────────

@@ -8,8 +8,10 @@ import * as sources from './sources/index.js';
 import { readNotionViaApi, listChildPagesViaApi } from './sources/notion-api.js';
 import { listPublicChildPages } from './sources/notion-public.js';
 import * as store from './store.js';
+import * as archive from './archive.js';
 import { startJob, getJob, jobView, cancelJob } from './jobs.js';
 import { generateBrief, findPartnershipPage } from './brief/generate.js';
+import { referenceKeywords } from './brief/reference.js';
 import * as videos from './video/store.js';
 import { prepareVideo } from './video/prepare.js';
 import { matchClip } from './video/match.js';
@@ -211,6 +213,11 @@ async function handleApi(req, res, url) {
   if (m === 'GET' && p === '/api/drafts/current') return json(res, 200, { draft: store.currentDraft() });
   if (m === 'GET' && p === '/api/drafts') return json(res, 200, { drafts: store.listDrafts() });
   if (m === 'GET' && p.startsWith('/api/drafts/')) return json(res, 200, { draft: store.loadDraft(p.split('/').pop()) });
+  if (m === 'GET' && p === '/api/archive') return json(res, 200, { entries: archive.listArchive() });
+  if (m === 'GET' && p.startsWith('/api/archive/')) {
+    const entry = archive.getArchive(p.split('/').pop());
+    return entry ? json(res, 200, { entry }) : json(res, 404, { error: '아카이브에서 찾지 못했습니다(지워졌을 수 있습니다).' });
+  }
   if (m === 'GET' && p.startsWith('/api/jobs/')) {
     const job = getJob(p.split('/')[3]);
     return job ? json(res, 200, { job: jobView(job) }) : json(res, 404, { error: '작업을 찾지 못했습니다(앱이 다시 켜졌을 수 있습니다).' });
@@ -248,7 +255,19 @@ async function handleApi(req, res, url) {
     if (!asset) return json(res, 404, { error: '없는 사진입니다.' });
     return json(res, 200, { asset });
   }
-  if (m === 'DELETE' && p.startsWith('/api/sources/')) return json(res, 200, { ok: sources.removeSource(p.split('/').pop()) });
+  if (m === 'DELETE' && p.startsWith('/api/sources/')) {
+    const id = p.split('/').pop();
+    // 아카이브의 기록이 쓰는 파일은 남겨 둔다 — 폼 목록에서만 빠진다.
+    if (archive.archivedSourceIds().has(id)) return json(res, 200, { ok: true, kept: true });
+    return json(res, 200, { ok: sources.removeSource(id) });
+  }
+
+  if (m === 'PUT' && p.startsWith('/api/archive/')) {
+    const body = await readJson(req);
+    const entry = archive.linkDraft(p.split('/').pop(), body.draftId);
+    return entry ? json(res, 200, { entry }) : json(res, 404, { error: '아카이브에서 찾지 못했습니다.' });
+  }
+  if (m === 'DELETE' && p.startsWith('/api/archive/')) return json(res, 200, { ok: archive.removeArchive(p.split('/').pop()) });
 
   if (m === 'PUT' && p.startsWith('/api/drafts/')) {
     const body = await readJson(req, 16 * 1024 * 1024);
@@ -308,9 +327,39 @@ async function handleApi(req, res, url) {
 
   if (m === 'POST' && p === '/api/generate') {
     const body = await readJson(req);
+    const inputs = body.inputs ?? {};
+    const sourceIds = body.sourceIds ?? [];
+    const started = Date.now();
     const job = startJob('generate', ({ progress, signal, dir }) => generateBrief({
-      inputs: body.inputs ?? {}, sourceIds: body.sourceIds ?? [], jobDir: dir, onProgress: progress, signal, lookupPartnership, useImage: useSourceImage,
+      inputs, sourceIds, jobDir: dir, onProgress: progress, signal, lookupPartnership, useImage: useSourceImage,
+    }).then((r) => {
+      // 끝나는 순간 아카이브에 남긴다 — 만드는 동안 창을 닫았어도 결과를 다시 열 수 있다.
+      let saved = null;
+      try {
+        saved = archive.addGeneration({
+          draftId: body.draftId,
+          fromDraftId: body.fromDraftId,
+          inputs,
+          sources: sourceIds.map((id) => sources.getSource(id)).filter(Boolean),
+          result: r,
+          elapsedMs: Date.now() - started,
+        });
+      } catch (e) {
+        r.infos = [...(r.infos ?? []), `아카이브에 남기지 못했습니다 — ${e.message}`];
+      }
+      return { ...r, archive: saved };
     }));
+    return json(res, 200, { jobId: job.id });
+  }
+  // 레퍼런스 검색 — 스텝 하나로 틱톡 검색 키워드 15개. previous 가 있으면 [새로 고침].
+  if (m === 'POST' && p === '/api/reference-keywords') {
+    const body = await readJson(req, 16 * 1024 * 1024);
+    const job = startJob('reference', ({ progress, signal, dir }) => {
+      progress({ phase: 'reference', detail: 'Claude 가 검색어를 만드는 중' });
+      return referenceKeywords({
+        doc: body.doc, stepId: body.stepId, previous: Array.isArray(body.previous) ? body.previous : [], jobDir: dir, signal,
+      });
+    });
     return json(res, 200, { jobId: job.id });
   }
   if (m === 'POST' && p === '/api/edit') {

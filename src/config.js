@@ -17,6 +17,7 @@ export const DATA_DIR = process.env.CBS_DIR
 
 export const DIRS = {
   drafts: path.join(DATA_DIR, 'drafts'),
+  archive: path.join(DATA_DIR, 'archive'),
   assets: path.join(DATA_DIR, 'assets'),
   sources: path.join(DATA_DIR, 'sources'),
   jobs: path.join(DATA_DIR, 'jobs'),
@@ -39,10 +40,15 @@ const DEFAULTS = {
    * 작성은 품질이 먼저라 opus, 편집은 기다림이 짧아야 해서 sonnet.
    * 영상: 화면 설명은 영상당 한 번뿐이고 양이 많아 haiku, 구간 고르기는 판단이 결과 품질이라 opus.
    * 기존 브리프 PDF 옮겨 적기는 판단이 아니라 베끼기라 sonnet(빠르다).
+   * 레퍼런스 검색어는 창을 띄워 놓고 기다리는 일이라 sonnet(몇 초).
    * 별칭(opus/sonnet/haiku)은 CLI 가 그때그때 최신 모델로 푼다.
    */
-  models: { compose: 'opus', edit: 'sonnet', translate: 'opus', frames: 'claude-haiku-4-5', match: 'claude-opus-5', importPdf: 'sonnet' },
-  timeouts: { composeMs: 8 * 60_000, editMs: 3 * 60_000, framesMs: 8 * 60_000, matchMs: 4 * 60_000, mediaMs: 10 * 60_000 },
+  models: {
+    compose: 'opus', edit: 'sonnet', translate: 'opus', frames: 'claude-haiku-4-5', match: 'claude-opus-5', importPdf: 'sonnet', reference: 'sonnet',
+  },
+  timeouts: {
+    composeMs: 8 * 60_000, editMs: 3 * 60_000, framesMs: 8 * 60_000, matchMs: 4 * 60_000, mediaMs: 10 * 60_000, referenceMs: 2 * 60_000,
+  },
 
   /** 영상 → 참고 GIF */
   media: {

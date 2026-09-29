@@ -4,8 +4,9 @@ import { getAt, imageSlots, setAt } from './doc.js';
 /**
  * 스텝의 회색 상자 **안에서** 영상 → 참고 GIF 를 만든다.
  *
- * 상자를 누르면 [영상으로 GIF 생성] · [GIF 업로드] 두 개가 상자 안에 뜨고,
+ * 상자를 누르면 [레퍼런스 검색] · [영상으로 자동 생성] · [GIF 업로드] 가 상자 안에 뜨고,
  * 올리기·차례 기다리기·처리·GIF 만들기가 전부 그 상자 안에서 보인다.
+ * [레퍼런스 검색]은 틱톡 검색어 창을 띄운다(onReference — main.js).
  * 창을 띄우는 곳은 한 군데뿐이다 — **구간 고르기**(미리보기가 커야 고를 수 있다).
  *
  * - **한 자리에 영상을 여러 개** 올릴 수 있다. 여러 개면 조각이 서로 다른 영상에서 올 수 있다.
@@ -65,9 +66,9 @@ function upload(file, { draftId, onProgress, onXhr }) {
   });
 }
 
-export function createVideoPanel({ root, getDoc, getDraftId, commit, toast }) {
+export function createVideoPanel({ root, getDoc, getDraftId, commit, toast, onReference }) {
   const jobs = new Map(); // nodeId → 작업 상태
-  const menus = new Set(); // nodeId — 버튼 두 개가 펼쳐진 상자
+  const menus = new Set(); // nodeId — 버튼들이 펼쳐진 상자
   const queue = []; // Claude 처리 차례(올리기 끝난 순서)
   let running = null; // 지금 도는 nodeId
 
@@ -94,9 +95,13 @@ export function createVideoPanel({ root, getDoc, getDraftId, commit, toast }) {
 
   function menuPanel(nodeId) {
     return el('div', { class: 'vp', dataset: { vidPanel: '1' } },
+      // 틱톡에서 참고 영상을 찾을 검색어 — 창은 main.js 가 띄운다.
       el('button', {
-        type: 'button', class: 'vp-btn primary', dataset: { vid: '1' }, on: { click: () => pick('video', nodeId) },
-      }, '영상으로 GIF 생성'),
+        type: 'button', class: 'vp-btn primary', dataset: { vid: '1' }, on: { click: () => onReference?.(nodeId) },
+      }, '레퍼런스 검색'),
+      el('button', {
+        type: 'button', class: 'vp-btn', dataset: { vid: '1' }, on: { click: () => pick('video', nodeId) },
+      }, '영상으로 자동 생성'),
       el('button', {
         type: 'button', class: 'vp-btn', dataset: { vid: '1' }, on: { click: () => pick('gif', nodeId) },
       }, 'GIF 업로드'),
@@ -422,7 +427,7 @@ export function createVideoPanel({ root, getDoc, getDraftId, commit, toast }) {
     paint();
   }
 
-  /** 회색 상자를 눌렀을 때 — 버튼 두 개를 폈다 접는다. 처리 중이면 그대로 둔다. */
+  /** 회색 상자를 눌렀을 때 — 버튼들을 폈다 접는다. 처리 중이면 그대로 둔다. */
   function toggle(nodeId) {
     if (jobs.has(nodeId)) return;
     if (menus.has(nodeId)) menus.delete(nodeId);

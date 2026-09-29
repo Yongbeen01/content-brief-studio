@@ -61,6 +61,17 @@ OAuth 연결 자체를 확인할 때만 설치본을 멈추고 4325 로 띄운�
   - 글을 먼저 `job.data.doc` 로 내보내고 사진은 받는 대로 `job.data.assets` 에 더한다(작업 중간 결과 — `jobs.js`).
     공개 페이지 사진은 `getSignedFileUrls` 로 서명해 원본(움직이는 GIF)을 받는다.
   - 불러온 문서는 `origin: 'import'` — 폼의 Account ID 가 Account Tag 를 덮지 않는다.
+- **아카이브**(`src/archive.js`): [생성]이 끝나는 순간 **서버가** 그때 입력 + 결과를 한 건씩 남긴다(창을 닫아도 남는다).
+  `archive/<id>.json` + 목록용 `index.json`. 기록은 고치지 않는다 — 열면 화면이 `draftId` 초안을 열어 이어서 고친다
+  (그 초안이 없거나 다른 생성으로 넘어갔으면 기록으로 새 초안을 만들고 연결을 바꾼다). 초안의 `generation` 이 어느 기록에서
+  왔는지 들고 있고, 이미 기획서가 있는 초안에서 다시 생성하면 **새 초안으로 갈라진다**(`main.js forkDraft`).
+  기록을 열면 폼은 늘 그 생성 때 입력으로 돌린다. 켤 때 `fromDraftId` 로 창을 닫은 사이 끝난 결과를 알아보고 바로 연다.
+  기록이 쓰는 사측 공유 파일은 폼에서 지워도 파일을 남긴다(`DELETE /api/sources`).
+- **완료 알림**(`web/js/notify.js`): 브라우저 Notification = 윈도우 오른쪽 아래 알림. 소리는 앱이 Web Audio 로 내고 알림은 silent.
+  허용 묻기·소리 켜기는 [생성]을 누른 순간에(사용자 동작이 있어야 된다).
+- **Account ID 여러 개**(`web/js/account.js`, 화면·서버 공용): 칸에는 `ID1, @ID2`, Account Tag 에는 `@ID1, @ID2`.
+- **레퍼런스 검색**(`src/brief/reference.js`, 문안은 `prompts.js REFERENCE_PROMPT` — CR팀이 준 글 그대로): 스텝 하나 → 틱톡 검색어 15개(sonnet).
+  {{step}} 의 칸 이름은 문안이 부르는 [행동]·[화면]·[자막]·[내레이션]·[시간]으로 고정. [새로 고침]만 직전 키워드를 덧붙여 겹치지 않게 한다.
 - `src/claude/` — Claude CLI 호출(구독 로그인, stream-json, --json-schema), JSON 추출.
 - `src/sources/` — 사측 공유 파일 읽기(docx·pptx·xlsx 는 의존성 없는 ZIP/XML 파서, PDF 는 Claude 가 직접 읽음, 노션 링크).
   사진도 같이 꺼낸다: `images.js`(추려내기)·`pdf-images.js`(PDF 안의 사진 객체 → JPEG 그대로 / PNG 로 다시 포장,
@@ -69,7 +80,7 @@ OAuth 연결 자체를 확인할 때만 설치본을 멈추고 4325 로 띄운�
   (제일 큰 사진을 넣으면 십중팔구 배경 그라데이션이다). 글쓰기와 같이 돌려 기다림이 겹치지 않게 한다.
 - 고치는 길이 둘이다: 글자만 있는 자리는 `web/js/direct.js` 가 Claude 없이 바로(무엇을 직접 고칠 수 있는지는
   그 파일에만 있다), 여러 조각이 얽힌 자리는 `src/brief/edit.js` 가 프롬프트로. 둘의 대상 판단은 짝이 맞아야 한다.
-- `src/media/`·`src/video/` — 스텝 참고 GIF: 영상에서 구간을 찾아 잘라 넣는다.
+- `src/media/`·`src/video/` — 스텝 참고 GIF([영상으로 자동 생성]): 영상에서 구간을 찾아 잘라 넣는다.
   도구(ffmpeg·whisper.cpp)는 **앱이 내려받아** `~/.content-brief-studio/tools/` 에 둔다(레포·npm 에는 넣지 않는다).
   1초에 한 장씩 뽑아 **12장을 격자 한 장**으로 합치는 게 비용의 핵심이다 — 낱장을 읽히면 왕복마다 대화가 다시 올라가
   몇 배가 된다. 화면 설명은 **영상당 한 번**(haiku) 만들어 `frames.json` 에 남기고, 구간 고르기는 **GIF 하나당 한 번**(opus).
