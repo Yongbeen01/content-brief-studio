@@ -85,6 +85,42 @@ const colorClass = (c) => (c && c !== 'default' ? `c-${c}` : '');
 
 const EMBED_KIND = { embed: '임베드', bookmark: '북마크', video: '영상' };
 
+/**
+ * 스텝의 오른쪽 칸 — 시간·행동·화면·자막·내레이션과 덧붙인 블록. 문서와 레퍼런스 검색 창(renderStepCard)이 같이 쓴다.
+ * path 가 없으면 누를 자리 표시(data-path)를 달지 않는다 — 창에서는 읽기만 한다.
+ */
+function stepFields(doc, n, t, ctx, path) {
+  const { lang } = ctx;
+  const at = (p) => (path ? { path: P(p) } : undefined);
+  // 소제목(고정 문구)과 내용은 따로 누른다 — 소제목을 누르면 그 글자를, 내용을 누르면 내용을 고친다.
+  const sub = (field, content, empty = '') => el('div', { class: 'n-sub' },
+    el('div', { class: 'n-h n-h3 n-label', dataset: at([...(path ?? []), 'labels', STEP_LABELS[field]]), title: path ? '소제목 고치기' : null },
+      labelText(doc, n, STEP_LABELS[field], lang)),
+    el('div', { class: 'n-sub-body', dataset: at([...(path ?? []), field]) }, content ?? el('div', { class: 'n-p n-empty' }, empty)));
+  const lines = (arr) => (arr?.length ? el('div', {}, arr.map((s) => el('div', { class: 'n-p' }, rich(s)))) : null);
+  const extra = (n.extra ?? []).map((c, i) => renderNode(doc, c, [...(path ?? []), 'extra', i], ctx));
+  // 불러온 브리프에 원래 없던 칸 — 비워 두면 노션에도 안 올라간다.
+  const none = doc.origin === 'import' ? (path ? '(원본에 없음 — 눌러서 추가)' : '(원본에 없음)') : null;
+  return [
+    sub('seconds', el('div', { class: 'n-p' }, t ? durationText(t, lang) : '')),
+    sub('action', n.action?.length ? el('ul', { class: 'n-ul' }, n.action.map((s) => el('li', {}, rich(s)))) : null, none ?? '(비어 있음)'),
+    sub('visual', n.visual?.length ? el('ul', { class: 'n-ul' }, n.visual.map((s) => el('li', {}, rich(s)))) : null, none ?? '(비어 있음)'),
+    sub('subtitle', lines(n.subtitle), none ?? '(비어 있음)'),
+    sub('narration', lines(n.narration), none ?? (path ? '(없음 — 눌러서 추가)' : '(없음)')),
+    ...extra,
+  ];
+}
+
+/** 레퍼런스 검색 창 오른쪽 카드 — 그 스텝 글을 문서와 똑같이(사진 칸 없이, 누를 수 없게). */
+export function renderStepCard(doc, step, { lang = 'ko' } = {}) {
+  const ctx = { editable: false, lang, tl: stepTimeline(doc) };
+  const t = ctx.tl.steps.get(step.id);
+  return el('div', { class: 'notion-doc' },
+    el('div', { class: 'n-block n-step' },
+      el('div', { class: 'n-h n-h3' }, el('strong', {}, rich(stepTitle(step, t, lang)))),
+      ...stepFields(doc, step, t, ctx, null)));
+}
+
 function renderNode(doc, n, path, ctx) {
   const lang = ctx.lang;
   switch (n.type) {
@@ -122,26 +158,11 @@ function renderNode(doc, n, path, ctx) {
     }
     case 'step': {
       const t = ctx.tl.steps.get(n.id);
-      // 소제목(고정 문구)과 내용은 따로 누른다 — 소제목을 누르면 그 글자를, 내용을 누르면 내용을 고친다.
-      const sub = (field, content, empty = '') => el('div', { class: 'n-sub' },
-        el('div', { class: 'n-h n-h3 n-label', dataset: { path: P([...path, 'labels', STEP_LABELS[field]]) }, title: '소제목 고치기' },
-          labelText(doc, n, STEP_LABELS[field], lang)),
-        el('div', { class: 'n-sub-body', dataset: { path: P([...path, field]) } }, content ?? el('div', { class: 'n-p n-empty' }, empty)));
-      const lines = (arr) => (arr?.length ? el('div', {}, arr.map((s) => el('div', { class: 'n-p' }, rich(s)))) : null);
-      const extra = (n.extra ?? []).map((c, i) => renderNode(doc, c, [...path, 'extra', i], ctx));
-      // 불러온 브리프에 원래 없던 칸 — 비워 두면 노션에도 안 올라간다.
-      const none = doc.origin === 'import' ? '(원본에 없음 — 눌러서 추가)' : null;
       return el('div', { class: 'n-block n-step' },
         el('div', { class: 'n-h n-h3', dataset: { path: P(path) }, title: '스텝 제목 고치기 · Claude 에게는 스텝 전체' }, el('strong', {}, rich(stepTitle(n, t, lang)))),
         el('div', { class: 'n-cols' },
           el('div', { class: 'n-col' }, slot({ ...n.image, displayLabel: `Step ${t?.index ?? ''} 참고 GIF` }, [...path, 'image'])),
-          el('div', { class: 'n-col' },
-            sub('seconds', el('div', { class: 'n-p' }, t ? durationText(t, lang) : '')),
-            sub('action', n.action?.length ? el('ul', { class: 'n-ul' }, n.action.map((s) => el('li', {}, rich(s)))) : null, none ?? '(비어 있음)'),
-            sub('visual', n.visual?.length ? el('ul', { class: 'n-ul' }, n.visual.map((s) => el('li', {}, rich(s)))) : null, none ?? '(비어 있음)'),
-            sub('subtitle', lines(n.subtitle), none ?? '(비어 있음)'),
-            sub('narration', lines(n.narration), none ?? '(없음 — 눌러서 추가)'),
-            ...extra)),
+          el('div', { class: 'n-col' }, ...stepFields(doc, n, t, ctx, path))),
         el('hr', { class: 'n-divider' }));
     }
     case 'grid': {

@@ -326,15 +326,21 @@
     </div>
   </dialog>
 
-  <!-- 레퍼런스 검색 — 스텝 장면을 찾을 틱톡 검색어. 누르면 틱톡 검색이 새 탭으로 열린다. -->
-  <dialog class="fx-overlay fx-modal" id="ref_dialog">
+  <!-- 레퍼런스 검색 — 스텝 장면을 찾을 틱톡 검색어. 누르면 틱톡 검색이 새 탭으로 열린다.
+       왼쪽은 검색어 목록, 오른쪽은 그 스텝 글을 문서와 똑같이 보여 주는 카드(preview.js renderStepCard). -->
+  <dialog class="fx-overlay fx-modal ref-dialog" id="ref_dialog">
     <div class="fx-overlay-head">레퍼런스 검색 <span class="fx-spacer"></span>
       <button type="button" class="fx-overlay-close" data-close aria-label="닫기"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
     </div>
     <div class="fx-overlay-body">
       <p class="fx-help" id="ref_where"></p>
-      <ol class="ref-list" id="ref_list"></ol>
-      <p class="fx-status" id="ref_status"></p>
+      <div class="ref-cols">
+        <div class="ref-left">
+          <ol class="ref-list" id="ref_list"></ol>
+          <p class="fx-status" id="ref_status"></p>
+        </div>
+        <div class="ref-step" id="ref_step"></div>
+      </div>
     </div>
     <div class="fx-overlay-foot">
       <div class="fx-overlay-actions">

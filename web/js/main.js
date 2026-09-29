@@ -5,7 +5,7 @@ import {
 } from './doc.js';
 import { translateFromCache } from './translatable.js';
 import { lintDoc } from './lint.js';
-import { renderDoc, setInline } from './preview.js';
+import { renderDoc, renderStepCard, setInline } from './preview.js';
 import { createEditor } from './editor.js';
 import { englishLabel, placeholderBlob, uploadImage } from './slots.js';
 import { createVideoPanel } from './video.js';
@@ -1774,8 +1774,10 @@ function openReference(slotId) {
   refTarget = { stepId: step.id, key: refKey(doc, step), slotId, step: tl?.index ?? 0 };
   const scene = `「${inline.plain(stepTitle(step, tl, docLang(doc)))}」 장면이 담긴 틱톡 영상을 찾는 검색어입니다.`;
   $('ref_where').textContent = extensionVersion()
-    ? `${scene} 누르면 틱톡 검색이 새 탭으로 열리고, 거기서 영상을 골라 [Step ${refTarget.step} GIF 생성]을 누르면 이 자리로 바로 들어옵니다.`
+    ? `${scene} 누르면 틱톡 검색이 새 탭으로 열립니다. 여러 검색어 탭에서 고른 영상이 한데 모이고, 아무 탭에서나 [Step ${refTarget.step} GIF 생성]을 누르면 전부 이 자리로 들어옵니다.`
     : `${scene} 누르면 틱톡 검색이 새 탭으로 열립니다.`;
+  // 오른쪽 카드 — 그 스텝 글을 문서와 똑같이(검색어를 고르며 스텝을 다시 읽을 수 있게)
+  $('ref_step').replaceChildren(renderStepCard(doc, step, { lang: docLang(doc) }));
   $('ref_list').replaceChildren();
   setStatus('ref_status', '');
   $('ref_refresh').disabled = false;
@@ -1951,7 +1953,12 @@ function wire() {
     onReference: openReference,
   });
   // 틱톡 탭의 [Step N GIF 생성] — 확장이 서버에 올린 영상을 그 스텝 상자로 받는다.
-  onExtensionEvent((ev) => videoPanel.fromExtension(ev));
+  // 다 받으면 확장이 이 화면으로 돌려보낸다 — 띄워 둔 레퍼런스 검색 창은 닫는다(틱톡 탭은 확장이 닫는다).
+  onExtensionEvent((ev) => {
+    const r = videoPanel.fromExtension(ev);
+    if (ev.kind === 'videos' && r?.ok && $('ref_dialog').open) $('ref_dialog').close();
+    return r;
+  });
 
   editor = createEditor({
     root: $('doc'),

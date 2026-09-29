@@ -600,6 +600,17 @@ details.card[open] > summary .fx-chevron { transform: rotate(180deg); }
 .ref-go { flex: none; font-size: 0.78rem; color: var(--fx-text-weaker); }
 .ref-list a:hover .ref-go { color: var(--fx-blue); }
 .ref-wait { display: flex; align-items: center; gap: 8px; padding: 18px 12px; border-radius: var(--fx-r-sm); background: var(--fx-card); color: var(--fx-text-weak); font-size: 0.9rem; }
+/* 왼쪽은 검색어(좁게), 오른쪽은 그 스텝 글을 문서와 똑같이 담은 카드 — 스텝을 보면서 검색어를 고른다 */
+.fx-modal.ref-dialog { max-width: 920px; }
+.ref-cols { display: grid; grid-template-columns: minmax(0, 280px) minmax(0, 1fr); gap: 12px; align-items: start; }
+.ref-left { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.ref-step { position: sticky; top: 0; min-width: 0; background: #fff; border-radius: var(--fx-r-sm); padding: 14px 18px; }
+.ref-step:empty { display: none; }
+.ref-step .notion-doc { max-width: none; font-size: 14px; }
+@media (max-width: 720px) {
+  .ref-cols { grid-template-columns: minmax(0, 1fr); }
+  .ref-step { position: static; }
+}
 
 /* ── 알림 ────────────────────────────────────────────────── */
 .toast {
