@@ -77,6 +77,20 @@ function productTitle(brand, product) {
   return p.toLowerCase().startsWith(b.toLowerCase()) ? p : `${b} ${p}`;
 }
 
+const HANGUL = /[ᄀ-ᇿ㄰-㆏가-힯]/;
+
+/**
+ * 노션 페이지 제목 — `[BRAND]US_TikTok_<제품명> _<컨셉> Guide`(팀이 쓰던 모양 그대로, 「 _」 앞 띄어쓰기까지).
+ * 제품명·컨셉은 Claude 가 내용을 다 쓴 뒤 영어로 정한 것(titleProduct·titleConcept). 비었으면 productName 으로.
+ */
+export function briefTitle(c) {
+  const brand = String(c.brandName ?? '').trim();
+  let product = String(c.titleProduct || c.productName || '').trim();
+  if (brand && product.toLowerCase().startsWith(brand.toLowerCase())) product = product.slice(brand.length).trim();
+  const concept = String(c.titleConcept ?? '').trim().replace(/[\s_-]*guide$/i, '').trim();
+  return `[${brand}]US_TikTok_${product}${concept ? ` _${concept} Guide` : ' Guide'}`;
+}
+
 /** 📢 안내 박스의 줄들 — 전부 고정 문구다. 없는 링크의 줄은 빼고 번호를 다시 매긴다. */
 export function headerLines({ uploadUrl, partnershipUrl, tiktokUrl, amazonUrl }) {
   const lines = [{ chrome: 'uploadDue', vars: {} }];
@@ -199,10 +213,13 @@ export function buildDoc(c, inputs, ctx = {}) {
   nodes.push(C('🙏', 'blue_background', [Pc('closing', {}, { color: 'blue' })], { role: 'closing' }));
 
   const sellingPoints = splitPoints(inputs.sellingPoints);
+  // 이름은 폼에서 받지 않고 내용을 쓴 뒤에 정한다(예전 초안처럼 이름을 받은 경우만 그대로).
+  const title = String(inputs.briefName ?? '').trim() || briefTitle(c);
+  if (HANGUL.test(title)) notes.push('노션 페이지 제목에 한글이 섞였습니다 — [노션에 최종 생성] 창에서 영어로 고쳐 주세요');
   return {
     doc: {
       version: 1,
-      title: String(inputs.briefName ?? '').trim(),
+      title,
       meta: { brand, product: String(c.productName).trim(), account, sellingPoints },
       nodes,
     },

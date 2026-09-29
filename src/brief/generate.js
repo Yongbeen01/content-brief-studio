@@ -25,11 +25,12 @@ import { inline } from './inline.js';
  *    옮기기가 실패해도 기획서는 그대로 나온다(그때는 [영어로 보기]를 누를 때 옮긴다).
  */
 
-export const REQUIRED_INPUTS = ['briefName', 'uploadUrl', 'accountId', 'sellingPoints', 'concept'];
+/** 브리프 이름은 받지 않는다 — 내용을 쓴 뒤 정한다(build.js briefTitle). 업로드폼·계정은 고른 캠페인에서 온다. */
+export const REQUIRED_INPUTS = ['uploadUrl', 'accountId', 'sellingPoints', 'concept'];
 
 export function validateInputs(inputs) {
   const errs = [];
-  const label = { briefName: '컨텐츠 브리프 이름', uploadUrl: '업로드폼 링크', accountId: 'Account ID', sellingPoints: '소구점', concept: '컨셉 설명' };
+  const label = { uploadUrl: '업로드폼 링크', accountId: 'Account ID', sellingPoints: '소구점', concept: '컨셉 설명' };
   for (const k of REQUIRED_INPUTS) if (!String(inputs?.[k] ?? '').trim()) errs.push(`${label[k]}을(를) 입력해 주세요`);
   const url = (v) => { try { return ['http:', 'https:'].includes(new URL(v).protocol); } catch { return false; } };
   if (inputs?.uploadUrl && !url(inputs.uploadUrl)) errs.push('업로드폼 링크가 올바른 주소가 아닙니다');

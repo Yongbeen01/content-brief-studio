@@ -124,7 +124,8 @@ label {
 .fx-required-label::after { content: ' *'; color: var(--fx-error); }
 .fx-required-label.is-filled::after { content: ''; }
 .fx-required-label.fx-flash { color: var(--fx-error) !important; }
-.fx-flash:is(input, textarea, .fx-attach, .fx-prefix) { border-color: var(--fx-error) !important; background: var(--fx-error-bg) !important; }
+.fx-flash:is(input, textarea, .fx-attach, .fx-prefix, .campaign-combo-trigger) { border-color: var(--fx-error) !important; background: var(--fx-error-bg) !important; }
+.form-hint.warn { color: var(--fx-warning); }
 
 /* ── 입력칸: 연한 회색 바탕 + 조금 진한 회색 테두리 ─────── */
 input[type="text"],
@@ -521,6 +522,53 @@ details.card[open] > summary .fx-chevron { transform: rotate(180deg); }
 .history-delete-btn { flex: none; background: none; border: none; padding: 0 2px; font-size: 1.1rem; line-height: 1; color: var(--fx-text-weaker); cursor: pointer; }
 .history-delete-btn:hover { color: var(--fx-error); }
 .history-empty { padding: 16px 8px; text-align: center; font-size: 0.85rem; color: var(--fx-text-weak); line-height: 1.5; }
+
+/* ── 캠페인 고르기 — 파이널 리포트 폼의 검색 드롭다운(tiktok-final-report.figma.css campaign-combo) 그대로 ── */
+.campaign-combo { position: relative; }
+.campaign-combo-trigger {
+  width: 100%; display: flex; align-items: center; gap: 8px;
+  background: var(--fx-input); color: var(--fx-text);
+  border: 1px solid var(--fx-input-stroke); border-radius: var(--fx-r-sm);
+  padding: 7px 10px; font: inherit; font-size: 0.93rem; text-align: left; cursor: pointer;
+  transition: border-color 0.2s ease;
+}
+.campaign-combo-trigger:focus-visible,
+.campaign-combo.is-open .campaign-combo-trigger { outline: none; border-color: var(--fx-blue); box-shadow: var(--fx-focus); background: #fff; }
+.campaign-combo-trigger:disabled { cursor: not-allowed; opacity: 0.7; }
+.campaign-combo-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.campaign-combo-value.is-placeholder { color: var(--fx-text-weak); }
+.campaign-combo-chevron { flex: none; color: var(--fx-text-weak); transition: transform 0.15s; }
+.campaign-combo.is-open .campaign-combo-chevron { transform: rotate(180deg); }
+.campaign-combo-panel {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 40;
+  display: flex; flex-direction: column;
+  background: #fff; border-radius: var(--fx-r-lg); box-shadow: var(--fx-shadow-pop); overflow: hidden;
+}
+.campaign-combo-panel input.campaign-combo-search,
+.campaign-combo-panel input.campaign-combo-search:focus {
+  border: none; border-bottom: 1px solid var(--fx-input-stroke); border-radius: 0;
+  background: #fff; box-shadow: none; padding: 9px 12px;
+}
+.campaign-combo-list { list-style: none; margin: 0; padding: 4px 0; max-height: 340px; overflow-y: auto; overscroll-behavior: contain; }
+.campaign-combo-group { padding: 8px 12px 3px; font-size: 0.72rem; font-weight: 600; color: var(--fx-text-weaker); }
+.campaign-combo-option { padding: 6px 12px; cursor: pointer; display: flex; flex-direction: column; gap: 1px; overflow-wrap: anywhere; }
+.campaign-combo-option.is-active { background: var(--fx-blue-weakest); }
+.campaign-combo-option[aria-selected="true"] .campaign-combo-title { color: var(--fx-blue); font-weight: 600; }
+.campaign-combo-title { font-size: 0.88rem; color: var(--fx-text); line-height: 1.35; }
+.campaign-combo-meta { font-size: 0.76rem; color: var(--fx-text-weak); line-height: 1.35; }
+.campaign-combo-option mark { background: none; color: var(--fx-blue); font-weight: 700; }
+.campaign-combo-empty { padding: 10px 12px; font-size: 0.85rem; color: var(--fx-text-weak); }
+/* 고른 캠페인에서 가져온 값 */
+.campaign-info { margin-top: 8px; background: var(--fx-sunken); grid-template-columns: 80px minmax(0, 1fr); font-size: 0.85rem; }
+.campaign-info.hidden { display: none; }
+.campaign-info dd { color: var(--fx-text); }
+.campaign-info a { color: var(--fx-blue); text-decoration: none; }
+.campaign-info a:hover { text-decoration: underline; }
+
+/* 게시 창 — 페이지 제목(자동으로 지은 이름을 여기서 고친다) */
+.publish-title { display: flex; flex-direction: column; gap: 4px; background: var(--fx-card); border-radius: var(--fx-r-sm); padding: 10px 12px; }
+.publish-title label { margin: 0; font-size: 0.8rem; color: var(--fx-text-weak); }
+.publish-title input { background: #fff; }
 
 /* ── 레퍼런스 검색 — 누르면 틱톡 검색이 새 탭으로 ─────────── */
 .ref-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }

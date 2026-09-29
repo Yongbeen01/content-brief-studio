@@ -111,6 +111,9 @@ export const COMPOSE = obj({
   },
   sourceNotes: str,
   warnings: strs(0, 12),
+  // 노션 페이지 제목 — 내용을 다 쓴 뒤에 정하도록 맨 끝에 둔다(코드가 [BRAND]US_TikTok_<제품> _<컨셉> Guide 로 조립).
+  titleProduct: { type: 'string', minLength: 1 },
+  titleConcept: { type: 'string', minLength: 1 },
 });
 
 // ── 편집·추가용 (문서 트리의 노드 모양, id 없이) ─────────────────────────────

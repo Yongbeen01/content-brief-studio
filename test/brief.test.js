@@ -341,7 +341,8 @@ test('편집·추가 — 가짜 Claude 로 한 바퀴', async () => {
 });
 
 test('생성 — 입력 검사, 소구점 누락이면 한 번 더 묻는다, 파트너십 링크', async () => {
-  assert.ok(validateInputs({}).length >= 5);
+  // 업로드폼·Account ID·소구점·컨셉 (브리프 이름은 받지 않는다 — 생성 뒤 자동)
+  assert.equal(validateInputs({}).length, 4);
   assert.ok(validateInputs({ ...inputs, uploadUrl: 'not a url' }).some((e) => /업로드폼/.test(e)));
   assert.ok(validateInputs({ ...inputs, accountId: 'bad id!' }).some((e) => /Account ID/.test(e)));
 

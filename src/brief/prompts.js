@@ -63,6 +63,11 @@ closing callout — and it swaps those to English on publish. You write only the
 - sellingPointCoverage: for EACH selling point in the input, the 1-based step numbers that show it. Every selling point must be covered.
 - sourceNotes: Korean markdown bullets of the product facts you used, each ending with (출처: file name). "자료 없음" when there were no materials.
 - warnings: short Korean notes about missing information you had to work around. Empty array when none.
+- titleProduct, titleConcept — the Notion page title, decided **last, after the whole guide is written**. The app builds it as
+  "[<brandName>]US_TikTok_<titleProduct> _<titleConcept> Guide". **Both are English only** (no Korean, even though the draft is Korean).
+  titleProduct: the product name as it is written in English, without the brand (e.g. "Microdart Spot Patch").
+  titleConcept: one word or a short phrase (1–4 words, Title Case) that best names this guide's concept, based on the steps you wrote
+  (e.g. "Close-Up & Reaction Angle", "Texture ASMR", "Morning Routine"). Do not add the word "Guide".
 
 ${FORMAT_RULES}`;
 }
@@ -83,9 +88,9 @@ function sourcesBlock(textSources, pdfSources) {
 
 export function composeUser({ inputs, textSources = [], pdfSources = [], feedback = '' }) {
   const stores = [inputs.tiktokUrl ? 'TikTok Shop' : '', inputs.amazonUrl ? 'Amazon' : ''].filter(Boolean);
+  const campaign = inputs.campaign?.title ? `${inputs.campaign.title}${inputs.campaign.brand ? ` (brand: ${inputs.campaign.brand})` : ''}` : '';
   return `# Brief inputs
-- Brief name: ${inputs.briefName}
-- Creator account(s) to tag: ${accountTag(inputs.accountId)}
+${campaign ? `- Campaign: ${campaign}\n` : ''}${inputs.briefName ? `- Brief name: ${inputs.briefName}\n` : ''}- Creator account(s) to tag: ${accountTag(inputs.accountId)}
 - Where the product is sold (links are added by the app): ${stores.length ? stores.join(', ') : 'not provided'}
 
 ## Selling points — MUST appear in the video and be emphasized (show it, subtitle it, say it)

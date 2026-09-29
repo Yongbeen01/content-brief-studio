@@ -13,20 +13,28 @@ import {
   accountTag, accountValue, badAccountIds, formatAccountInput,
 } from './account.js';
 import * as notice from './notify.js';
+import { createCampaignPicker } from './campaign.js';
 
 const $ = (id) => document.getElementById(id);
 const inline = createInline(window.markdownit);
 setInline(inline);
 
 const DEFAULT_PARENT = '3d439fd7477e80058995edf04a5d1586';
+/**
+ * 폼 칸. 브리프 이름은 받지 않는다(생성 뒤 자동). 업로드폼 링크·Account ID 는 고른 캠페인에서 오고,
+ * 캠페인에 그 값이 없을 때만 직접 넣는 칸(MANUAL)이 보인다.
+ */
 const FIELDS = {
-  briefName: 'f_name', uploadUrl: 'f_upload', tiktokUrl: 'f_tiktok', amazonUrl: 'f_amazon',
-  accountId: 'f_account', sellingPoints: 'f_points', concept: 'f_concept',
+  tiktokUrl: 'f_tiktok', amazonUrl: 'f_amazon', sellingPoints: 'f_points', concept: 'f_concept',
 };
-const REQUIRED = ['briefName', 'uploadUrl', 'accountId', 'sellingPoints', 'concept'];
+const MANUAL = { uploadUrl: 'f_upload', accountId: 'f_account' };
 const LABEL = {
-  briefName: '컨텐츠 브리프 이름', uploadUrl: '업로드폼 링크', tiktokUrl: '틱톡샵 링크', amazonUrl: '아마존 링크',
-  accountId: 'Account ID', sellingPoints: '소구점', concept: '컨셉 설명',
+  campaign: '캠페인', uploadUrl: '업로드폼 링크', tiktokUrl: '틱톡샵 링크', amazonUrl: '아마존 링크',
+  accountId: 'Account ID', sources: '사측 공유 파일', sellingPoints: '소구점', concept: '컨셉 설명',
+};
+/** 필수 칸이 비었을 때 번쩍일 곳 — 제목(label) 과 입력칸 */
+const REQ_TARGET = {
+  campaign: 'campaign_trigger', uploadUrl: 'f_upload', accountId: 'f_account_wrap', sources: 'f_notion', sellingPoints: 'f_points', concept: 'f_concept',
 };
 
 const state = {
@@ -43,6 +51,10 @@ const state = {
   lang: 'ko',
   /** 아카이브 목록(요약) — 새것이 앞 */
   archive: [],
+  /** 캠페인 목록(외부 API) — configured = 키가 있음, error = 목록을 못 받음(그때는 직접 넣는 칸으로) */
+  campaigns: { configured: null, list: [], error: '', loadedAt: 0 },
+  /** 고른 캠페인의 계정·업로드폼을 가져오는 중 */
+  campaignLoading: false,
 };
 
 const isImport = () => state.draft?.mode === 'import';
@@ -87,7 +99,10 @@ function newDraft() {
     createdAt: Date.now(),
     /** 'new' = 새로 생성, 'import' = 기존 브리프 업로드 */
     mode: state.draft?.mode ?? 'new',
-    inputs: Object.fromEntries(Object.keys(FIELDS).map((k) => [k, ''])),
+    inputs: {
+      ...Object.fromEntries(Object.keys(FIELDS).map((k) => [k, ''])),
+      uploadUrl: '', accountId: '', manualUploadUrl: '', manualAccountId: '', campaign: null,
+    },
     sourceIds: [],
     /** 기존 브리프 — { kind:'notion', url } 또는 { kind:'pdf', sourceId, name } */
     importSource: null,
@@ -133,24 +148,62 @@ async function saveNow(draft = state.draft) {
 
 // ── 폼 ──────────────────────────────────────────────────────────────────────
 
+/**
+ * 지금 폼 값. uploadUrl·accountId 는 **쓰일 값**이다 — 캠페인에 있으면 캠페인 것, 없으면 직접 넣은 것.
+ * 직접 넣은 값은 manual* 로 따로 둔다(캠페인을 바꿨을 때 앞 캠페인 값이 칸에 남지 않게).
+ */
 function readForm() {
   const v = {};
   for (const [k, id] of Object.entries(FIELDS)) v[k] = $(id).value;
+  const c = state.draft?.inputs?.campaign ?? null;
+  v.campaign = c;
+  v.manualUploadUrl = $(MANUAL.uploadUrl).value.trim();
   // 계정 여러 개 — 'a, @b'. 방금 띄운 빈 자리는 뺀다.
-  v.accountId = accountValue(v.accountId);
+  v.manualAccountId = accountValue($(MANUAL.accountId).value);
+  v.uploadUrl = c?.uploadUrl || v.manualUploadUrl;
+  v.accountId = c?.accountId || v.manualAccountId;
   return v;
 }
 
 function fillForm(inputs) {
   for (const [k, id] of Object.entries(FIELDS)) $(id).value = inputs?.[k] ?? '';
+  // 예전 초안(캠페인 고르기 전)은 uploadUrl·accountId 가 곧 직접 넣은 값이다.
+  const old = !inputs?.campaign;
+  $(MANUAL.uploadUrl).value = inputs?.manualUploadUrl ?? (old ? inputs?.uploadUrl ?? '' : '');
+  $(MANUAL.accountId).value = inputs?.manualAccountId ?? (old ? inputs?.accountId ?? '' : '');
+  renderCampaign();
 }
 
+/** 이 초안이 쓰는 사측 공유 파일 중 읽기를 마친 것 */
+const readySources = () => state.draft.sourceIds.filter((id) => state.sources.get(id)?.status === 'ready');
+
+/** 캠페인 목록을 쓸 수 있으면 캠페인이 필수다. 키가 없거나 목록을 못 받으면 예전처럼 직접 넣는다. */
+const campaignMode = () => state.campaigns.configured === true && !state.campaigns.error;
+
 function formProblems(v) {
-  const missing = REQUIRED.filter((k) => !String(v[k] ?? '').trim()).map((k) => LABEL[k]);
+  const missing = [];
+  if (campaignMode() && !v.campaign) missing.push('campaign');
+  if (!v.uploadUrl) missing.push('uploadUrl');
+  if (!v.accountId) missing.push('accountId');
+  if (!readySources().length) missing.push('sources');
+  for (const k of ['sellingPoints', 'concept']) if (!String(v[k] ?? '').trim()) missing.push(k);
   const bad = [];
   for (const k of ['uploadUrl', 'tiktokUrl', 'amazonUrl']) if (v[k].trim() && !isUrl(v[k].trim())) bad.push(`${LABEL[k]} 주소 형식`);
   if (badAccountIds(v.accountId).length) bad.push('Account ID(영문·숫자·밑줄·점만)');
   return { missing, bad };
+}
+
+/** 비어 있는 필수 칸을 잠깐 붉게 — 「필수: …」 문구 대신. 첫 칸으로 스크롤한다. */
+function flashMissing(keys) {
+  const els = [];
+  for (const k of keys) {
+    const lbl = document.querySelector(`[data-req="${k}"]`);
+    const box = k === 'sources' ? $('f_notion')?.closest('.fx-attach') : $(REQ_TARGET[k]);
+    for (const el of [lbl, box]) if (el && el.offsetParent !== null) els.push(el);
+  }
+  for (const el of els) el.classList.add('fx-flash');
+  els[0]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  setTimeout(() => els.forEach((el) => el.classList.remove('fx-flash')), 1600);
 }
 
 /**
@@ -173,9 +226,11 @@ function refreshFormState() {
   const { missing, bad } = formProblems(v);
   for (const lbl of document.querySelectorAll('[data-req]')) {
     const k = lbl.dataset.req;
-    lbl.classList.toggle('is-filled', k === 'importSource' ? !!state.draft.importSource : !!String(v[k] ?? '').trim());
+    lbl.classList.toggle('is-filled', k === 'importSource' ? !!state.draft.importSource : !missing.includes(k));
   }
-  for (const k of ['uploadUrl', 'tiktokUrl', 'amazonUrl']) $(FIELDS[k]).classList.toggle('is-invalid', !!v[k].trim() && !isUrl(v[k].trim()));
+  for (const [k, id] of [['uploadUrl', MANUAL.uploadUrl], ['tiktokUrl', FIELDS.tiktokUrl], ['amazonUrl', FIELDS.amazonUrl]]) {
+    $(id).classList.toggle('is-invalid', !!v[k].trim() && !isUrl(v[k].trim()));
+  }
 
   if (isImport()) {
     const src = state.draft.importSource;
@@ -192,11 +247,12 @@ function refreshFormState() {
   }
 
   const reading = [...state.sources.values()].some((s) => s.status === 'reading' && state.draft.sourceIds.includes(s.id));
-  const ok = !missing.length && !bad.length;
-  $('generate_btn').disabled = !ok || state.busy || reading || !!state.importJob;
+  // 필수 칸이 비어 있어도 버튼은 눌린다 — 누르면 빈 칸이 번쩍인다(「필수: …」 문구는 두지 않는다).
+  $('generate_btn').disabled = state.busy || reading || !!state.importJob || state.campaignLoading;
   if (state.busy || state.importJob) return;
-  if (missing.length) setStatus('form_status', `필수: ${missing.join(', ')}`, 'warn');
-  else if (bad.length) setStatus('form_status', `확인해 주세요: ${bad.join(', ')}`, 'bad');
+  // 주소 형식 같은 잘못은 빈 칸이 남아 있어도 알린다. 빈 필수 칸은 문구 없이 빨간 별(누르면 번쩍임)로만.
+  if (bad.length) setStatus('form_status', `확인해 주세요: ${bad.join(', ')}`, 'bad');
+  else if (missing.length) setStatus('form_status', '');
   else if (reading) setStatus('form_status', '사측 공유 파일을 읽는 중입니다 — 끝나면 생성할 수 있습니다', 'busy');
   else if (state.draft.generation) setStatus('form_status', '다시 누르면 지금 입력으로 새로 만듭니다(지금 기획서는 아카이브에 그대로 남습니다)');
   else setStatus('form_status', state.draft.doc ? '다시 누르면 지금 입력으로 새로 만듭니다(지금 미리보기는 되돌리기로 살릴 수 있습니다)' : '');
@@ -206,16 +262,136 @@ function onFormInput(e) {
   if (e?.target?.id === 'f_account') formatAccountField(e);
   state.draft.inputs = readForm();
   refreshFormState();
-  if (state.draft.doc) renderPreview(); // 제목은 브리프 이름을 따라간다
+  if (state.draft.doc) renderPreview(); // Account Tag 는 폼(캠페인·직접 넣은 계정)을 따라간다
+  scheduleSave();
+}
+
+// ── 캠페인 ──────────────────────────────────────────────────────────────────
+
+let picker = null;
+let pickSeq = 0;
+
+function kvRow(k, v) {
+  const dt = document.createElement('dt');
+  dt.textContent = k;
+  const dd = document.createElement('dd');
+  if (v instanceof Node) dd.append(v);
+  else dd.textContent = v;
+  return [dt, dd];
+}
+
+/**
+ * 캠페인 칸과, 캠페인에 없는 값만 직접 넣는 칸을 지금 상태대로 그린다.
+ * - 목록을 불러오는 중: 직접 넣는 칸은 숨긴다(깜빡이지 않게).
+ * - 캠페인을 쓸 수 있음: 고른 캠페인에 업로드폼·계정이 없을 때만 그 칸이 보인다.
+ * - 키가 없거나 목록을 못 받음: 예전처럼 직접 넣는다.
+ */
+function renderCampaign() {
+  if (!picker || !state.draft) return;
+  const c = state.draft.inputs?.campaign ?? null;
+  const api = state.campaigns;
+  const loading = api.configured === null;
+  const mode = campaignMode();
+  const placeholder = loading ? '캠페인을 불러오는 중…'
+    : api.configured === false ? '팀 설정이 필요합니다'
+      : api.error ? '캠페인 목록을 불러오지 못했습니다'
+        : '캠페인을 고르세요';
+  picker.setList(api.list, { disabled: !mode || state.busy, placeholder });
+  picker.setValue(c, placeholder);
+
+  const hint = $('campaign_hint');
+  hint.classList.toggle('warn', !loading && !mode);
+  hint.textContent = api.configured === false
+    ? '캠페인 목록을 쓰려면 팀 설정(외부 API 키)이 필요합니다 — 관리자에게 받은 설치 파일의 install.bat 을 한 번 다시 실행하거나, 오른쪽 위 노션 버튼 → [팀 설정 코드 다시 넣기]. 그동안은 아래 칸에 직접 넣어 주세요.'
+    : api.error ? `${api.error} 그동안은 아래 칸에 직접 넣어 주세요.`
+      : '고르면 Account ID 와 업로드폼 링크를 캠페인 정보에서 가져옵니다.';
+
+  const info = $('campaign_info');
+  if (c) {
+    let form;
+    if (state.campaignLoading) form = '캠페인 메일에서 찾는 중…';
+    else if (c.uploadUrl) {
+      form = document.createElement('a');
+      form.href = c.uploadUrl;
+      form.target = '_blank';
+      form.rel = 'noopener noreferrer';
+      form.textContent = c.uploadUrl;
+    } else form = '못 찾음 — 아래에 직접 넣어 주세요';
+    info.replaceChildren(
+      ...kvRow('Account ID', c.accountId ? accountTag(c.accountId) : '없음 — 아래에 직접 넣어 주세요'),
+      ...kvRow('업로드폼', form),
+    );
+  }
+  info.classList.toggle('hidden', !c);
+
+  const fallback = !loading && !mode;
+  const showUpload = !state.campaignLoading && (fallback ? !c?.uploadUrl : !!c && !c.uploadUrl);
+  const showAccount = !state.campaignLoading && (fallback ? !c?.accountId : !!c && !c.accountId);
+  $('f_upload_group').classList.toggle('hidden', !showUpload);
+  $('f_account_group').classList.toggle('hidden', !showAccount);
+  $('f_upload_hint').textContent = c
+    ? `${c.uploadNote || '이 캠페인에서 업로드폼 링크를 찾지 못했습니다'} — 직접 넣어 주세요. 「submit your video URL here」에 걸립니다.`
+    : '크리에이터가 영상 주소를 제출할 폼 — 「submit your video URL here」에 걸립니다.';
+  $('f_account_hint').textContent = c
+    ? '이 캠페인 정보에 계정이 없습니다 — 직접 넣어 주세요. 계정이 여러 개면 띄어쓰기를 누르고 이어서 쓰세요.'
+    : 'Account Tag 에 그대로 들어갑니다. 계정이 여러 개면 띄어쓰기를 누르고 이어서 쓰세요 — @ID1, @ID2 로 들어갑니다.';
+}
+
+async function loadCampaigns({ fresh = false } = {}) {
+  try {
+    const r = await api('GET', `/api/campaigns${fresh ? '?fresh=1' : ''}`);
+    state.campaigns = {
+      configured: !!r.configured, list: r.campaigns ?? [], error: r.error ?? '', loadedAt: Date.now(),
+    };
+  } catch (e) {
+    state.campaigns = {
+      ...state.campaigns, configured: state.campaigns.configured ?? true, error: e.message, loadedAt: Date.now(),
+    };
+  }
+  renderCampaign();
+  refreshFormState();
+}
+
+/** 캠페인을 골랐다 — 목록에 있는 계정은 바로, 업로드폼은 캠페인 메일을 읽어 채운다. */
+async function pickCampaign(c) {
+  if (state.busy || state.importJob) {
+    toast('지금 하는 작업이 끝난 뒤에 바꿔 주세요');
+    return;
+  }
+  const seq = ++pickSeq;
+  const snap = (x) => ({
+    id: x.id,
+    title: x.title,
+    brand: x.brand,
+    status: x.status,
+    snsType: x.snsType,
+    managedYearMonth: x.managedYearMonth,
+    accountId: x.accountId ?? '',
+    uploadUrl: x.uploadUrl ?? '',
+    uploadNote: x.uploadNote ?? '',
+  });
+  state.draft.inputs = { ...state.draft.inputs, campaign: snap(c) };
+  state.campaignLoading = true;
+  renderCampaign();
+  refreshFormState();
+  try {
+    const { campaign } = await api('GET', `/api/campaigns/${c.id}`);
+    if (seq !== pickSeq) return;
+    state.draft.inputs.campaign = snap(campaign);
+  } catch (e) {
+    if (seq !== pickSeq) return;
+    state.draft.inputs.campaign.uploadNote = `캠페인 정보를 가져오지 못했습니다(${e.message})`;
+  } finally {
+    if (seq === pickSeq) state.campaignLoading = false;
+  }
+  state.draft.inputs = readForm();
+  renderCampaign();
+  refreshFormState();
+  if (state.draft.doc) renderPreview();
   scheduleSave();
 }
 
 // ── 새로 생성 ↔ 기존 브리프 업로드 ─────────────────────────────────────────
-
-const NAME_HINT = {
-  new: '노션 페이지 제목이 됩니다. 예) [BRAND]US_TikTok_제품명 _컨셉 Guide',
-  import: '노션 페이지 제목이 됩니다. 불러오면 원래 제목이 들어갑니다 — 새 브리프로 올릴 거면 바꿔 주세요.',
-};
 
 /** 탭은 왼쪽 칸만 바꾼다 — 지금 미리보기는 그대로 둔다(불러오기·생성을 눌러야 바뀐다). */
 function applyMode() {
@@ -227,7 +403,6 @@ function applyMode() {
   $('new_fields').classList.toggle('hidden', imp);
   $('import_fields').classList.toggle('hidden', !imp);
   $('form_section').classList.toggle('is-import', imp);
-  $('f_name_hint').textContent = NAME_HINT[imp ? 'import' : 'new'];
   $('empty_hint').textContent = imp
     ? '왼쪽에 기존 브리프를 넣고 [불러오기]를 누르면 여기에 그대로 나옵니다.'
     : '왼쪽을 채우고 [생성]을 누르면 여기에 노션 페이지 모양으로 나옵니다.';
@@ -443,7 +618,8 @@ function currentDoc() {
   });
   return {
     ...d,
-    title: state.draft.inputs.briefName.trim() || d.title,
+    // 이름 칸은 없어졌다 — 예전 초안에 남은 이름만 따르고, 아니면 생성 때 지은 제목(게시 창에서 고친다).
+    title: String(state.draft.inputs.briefName ?? '').trim() || d.title,
     meta: { ...d.meta, account: account || d.meta?.account },
     nodes,
   };
@@ -603,6 +779,7 @@ function setBusy(on) {
   state.busy = on;
   $('generate_btn').classList.toggle('is-loading', on && !!state.generateJob);
   refreshFormState();
+  renderCampaign(); // 작업 중에는 캠페인을 못 바꾼다
   $('undo_btn').disabled = !state.undo.length || on;
   $('publish_btn').disabled = !state.draft.doc || on;
   // 작업이 끝나면 다시 그려서 누를 곳·추가할 틈을 되살린다. 작업 중에 그린 화면은 편집이 꺼진 모양이다.
@@ -613,7 +790,11 @@ async function generate() {
   if (state.busy) return;
   const inputs = readForm();
   const { missing, bad } = formProblems(inputs);
-  if (missing.length || bad.length) return refreshFormState();
+  if (missing.length || bad.length) {
+    // 「필수: …」 문구 대신 빈 칸이 번쩍인다(제목 옆 빨간 별은 늘 보인다).
+    if (missing.length) flashMissing(missing);
+    return refreshFormState();
+  }
   if (state.claude.found === false) return toast('Claude Code 가 설치되어 있지 않습니다', true);
   if (state.claude.loggedIn === false) {
     toast('먼저 오른쪽 위 [Claude 로그인]을 눌러 주세요', true);
@@ -666,7 +847,7 @@ async function generate() {
       $('progress_cancel').classList.add('hidden');
       setTimeout(() => $('progress_panel').classList.add('hidden'), 4000);
       toast('미리보기를 만들었습니다');
-      notice.notify('콘텐츠 브리프 생성 완료', `${inputs.briefName} · ${took} 걸렸습니다. 눌러서 확인하세요.`);
+      notice.notify('콘텐츠 브리프 생성 완료', `${r.doc.title} · ${took} 걸렸습니다. 눌러서 확인하세요.`);
       $('doc_card').scrollIntoView({ behavior: 'smooth', block: 'start' });
     } else {
       $('progress_title').textContent = job.status === 'cancelled' ? '멈췄습니다' : '만들지 못했습니다';
@@ -713,14 +894,11 @@ function forkDraft(id) {
 
 // ── 기존 브리프 불러오기 ────────────────────────────────────────────────────
 
-/** 불러온 글을 미리보기에 올린다. 제목은 원래 제목으로(바꾸려면 이름 칸에서). */
+/** 불러온 글을 미리보기에 올린다. 제목은 원래 제목 그대로(바꾸려면 [노션에 최종 생성] 창에서). */
 function showImported(r) {
   // 생성한 기획서가 있던 초안이면 새 초안으로 — 앞의 기획서는 아카이브에서 그대로 열린다.
   if (state.draft.generation) forkDraft(uid() + uid());
-  if (r.doc.title) {
-    state.draft.inputs.briefName = r.doc.title;
-    $('f_name').value = r.doc.title;
-  }
+  state.draft.inputs.briefName = ''; // 예전 초안에 남은 이름이 원래 제목을 가리지 않게
   commitDoc(r.doc);
   if (r.docEn) {
     state.draft.docEn = r.docEn;
@@ -1104,6 +1282,8 @@ async function saveTeamCode() {
     paintNotion();
     $('team_code').value = '';
     $('team_dialog').close();
+    // 새 팀 설정 코드에는 외부 API 키가 들어 있을 수 있다 — 캠페인 목록을 다시 받는다.
+    loadCampaigns({ fresh: true });
     await connectNotion();
   } catch (e) { setStatus('team_status', e.message, 'bad'); }
 }
@@ -1130,7 +1310,7 @@ function openPublish() {
     kv.append(dt, dd);
   };
   add('만들 위치', state.notion.parentPageId === DEFAULT_PARENT ? 'Contents Guidline 아래 새 페이지' : `테스트 부모 ${state.notion.parentPageId} 아래 새 페이지`);
-  add('페이지 제목', doc.title || '(비어 있음)');
+  $('publish_title').value = doc.title || '';
   const ready = enFresh() || !!translateFromCache(doc, state.draft.enCache);
   add('언어', docLang(doc) === 'en' && ready ? '영어 브리프 그대로 올립니다'
     : ready ? '영어본 준비됨 (영어로 보기로 확인 가능)' : '올리기 직전에 영어로 옮깁니다(바뀐 줄만)');
@@ -1155,7 +1335,19 @@ function openPublish() {
   openDialog('publish_dialog');
 }
 
+/**
+ * 게시 창에서 제목을 고쳤으면 문서에 넣는다 — 이름 칸이 없어져서 제목을 고치는 곳은 여기뿐이다.
+ * 예전 초안에 남은 이름(inputs.briefName)은 비운다(그게 있으면 문서 제목보다 앞선다).
+ */
+function applyPublishTitle() {
+  const t = $('publish_title').value.replace(/\s+/g, ' ').trim();
+  if (!t || t === currentDoc()?.title) return;
+  state.draft.inputs.briefName = '';
+  commitDoc({ ...state.draft.doc, title: t });
+}
+
 async function doPublish() {
+  applyPublishTitle();
   const doc = currentDoc();
   if (!doc || state.busy) return;
   const go = $('publish_go');
@@ -1553,11 +1745,20 @@ function startNew() {
   renderPreview();
   renderArchive();
   scheduleSave();
-  $(isImport() ? 'i_link' : 'f_name').focus();
+  (isImport() ? $('i_link') : picker?.trigger)?.focus();
 }
 
 function wire() {
-  for (const id of Object.values(FIELDS)) $(id).addEventListener('input', onFormInput);
+  for (const id of [...Object.values(FIELDS), ...Object.values(MANUAL)]) $(id).addEventListener('input', onFormInput);
+
+  // 캠페인 드롭다운 — 펼칠 때 목록이 5분 넘게 묵었으면 새로 받는다.
+  picker = createCampaignPicker({
+    onPick: pickCampaign,
+    onOpen: () => { if (Date.now() - state.campaigns.loadedAt > 5 * 60_000) loadCampaigns(); },
+  });
+  // 게시 창의 제목 — 비우면 못 올린다. Enter 로 바로 올린다.
+  $('publish_title').addEventListener('input', () => { $('publish_go').disabled = !$('publish_title').value.trim(); });
+  $('publish_title').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing && !$('publish_go').disabled) doPublish(); });
   // 칸을 떠나면 끝에 남은 빈 자리(「, @」)를 치운다.
   $('f_account').addEventListener('blur', () => {
     const acc = $('f_account');
@@ -1664,6 +1865,7 @@ function wire() {
     wire();
     await refreshState();
     await loadDraft();
+    loadCampaigns(); // 외부 API — 느려도 화면을 막지 않는다
     await refreshArchive();
     await resumeFinished();
     setInterval(refreshState, 30_000);

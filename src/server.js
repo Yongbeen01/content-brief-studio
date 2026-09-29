@@ -26,6 +26,7 @@ import { isNotionUrl } from './sources/notion-public.js';
 import { publishDoc } from './notion/publish.js';
 import { notionClient } from './notion/index.js';
 import * as oauth from './notion/oauth.js';
+import * as kglowing from './external/kglowing.js';
 import { updateStatus, bootId } from './update.js';
 
 const WEB = path.join(ROOT, 'web');
@@ -160,7 +161,25 @@ async function handleApi(req, res, url) {
       update: updateStatus(),
       models: config.models,
       media: toolsStatus(),
+      externalApi: { configured: kglowing.isConfigured() },
     });
+  }
+
+  // 캠페인 고르기 — 목록(5분 캐시)과, 고른 캠페인의 Account ID·업로드폼 링크.
+  if (m === 'GET' && p === '/api/campaigns') {
+    if (!kglowing.isConfigured()) return json(res, 200, { configured: false, campaigns: [] });
+    try {
+      return json(res, 200, { configured: true, campaigns: await kglowing.listCampaigns({ force: url.searchParams.get('fresh') === '1' }) });
+    } catch (e) {
+      return json(res, 200, { configured: true, campaigns: [], error: e.message });
+    }
+  }
+  if (m === 'GET' && /^\/api\/campaigns\/\d+$/.test(p)) {
+    try {
+      return json(res, 200, { campaign: await kglowing.campaignInfo(p.split('/').pop()) });
+    } catch (e) {
+      return json(res, e.status && e.status < 500 ? e.status : 502, { error: e.message });
+    }
   }
 
   // 노션 승인 뒤 노션이 브라우저를 여기로 돌려보낸다 — 토큰 헤더가 없는 유일한 쓰기 경로라 state 로 확인한다.
@@ -234,7 +253,7 @@ async function handleApi(req, res, url) {
   if (m === 'POST' && p === '/api/team-code') {
     const body = await readJson(req);
     oauth.applyTeamCode(body.code);
-    return json(res, 200, { notion: notionState() });
+    return json(res, 200, { notion: notionState(), externalApi: { configured: kglowing.isConfigured() } });
   }
   if (m === 'POST' && p === '/api/notion/connect') return json(res, 200, { url: oauth.authorizeUrl() });
   if (m === 'POST' && p === '/api/notion/disconnect') { oauth.disconnect(); return json(res, 200, { notion: notionState() }); }
@@ -329,6 +348,10 @@ async function handleApi(req, res, url) {
     const body = await readJson(req);
     const inputs = body.inputs ?? {};
     const sourceIds = body.sourceIds ?? [];
+    // 사측 공유 파일은 필수다 — 자료 없이 쓰면 제품 설명을 지어낼 수밖에 없다.
+    if (!sourceIds.some((id) => sources.getSource(id)?.status === 'ready')) {
+      return json(res, 400, { error: '사측 공유 파일을 하나 이상 넣어 주세요.' });
+    }
     const started = Date.now();
     const job = startJob('generate', ({ progress, signal, dir }) => generateBrief({
       inputs, sourceIds, jobDir: dir, onProgress: progress, signal, lookupPartnership, useImage: useSourceImage,

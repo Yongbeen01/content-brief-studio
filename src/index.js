@@ -1,12 +1,22 @@
 import { execFile } from 'node:child_process';
-import { DATA_DIR, baseUrl, config, ensureDirs, appVersion } from './config.js';
+import {
+  DATA_DIR, baseUrl, config, ensureDirs, appVersion, applyTeamEnvFile,
+} from './config.js';
 import { createServer } from './server.js';
 import { refreshAuth, claudeFound } from './claude/cli.js';
 import { pruneJobDirs, runningCount } from './jobs.js';
 import { pruneVideos } from './video/store.js';
 import { bindBusy, startUpdatePolling } from './update.js';
+import { isConfigured, listCampaigns } from './external/kglowing.js';
 
 ensureDirs();
+// 설치 패키지로 들어온 팀 설정(노션 연결 정보·외부 API 키) — 팀 설정 코드를 붙여넣지 않아도 되게.
+try {
+  const applied = applyTeamEnvFile();
+  if (applied.length) console.log(`  팀 설정 파일을 적용했습니다: ${applied.join(', ')}`);
+} catch (e) {
+  console.error(`  팀 설정 파일을 읽지 못했습니다 — ${e.message}`);
+}
 pruneJobDirs();
 pruneVideos(); // 오래된 영상은 지운다 — 만든 GIF 는 사진첩에 따로 있어 문서는 멀쩡하다
 
@@ -30,6 +40,8 @@ server.listen(config.port, config.host, () => {
   console.log(`  노션 부모 ${config.notion.parentPageId}`);
   console.log('');
   refreshAuth();
+  // 캠페인 목록은 받는 데 몇 초 걸린다 — 화면이 열리기 전에 미리 받아 둔다(키가 있을 때만, 실패는 화면이 알린다).
+  if (isConfigured()) listCampaigns().catch(() => {});
   bindBusy(runningCount);
   startUpdatePolling();
   if (config.openBrowserOnStart) openBrowser(baseUrl());

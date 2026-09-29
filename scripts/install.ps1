@@ -41,6 +41,13 @@ Write-Host "  TikTok 크리에이터 영상 가이드를 만들고 노션에 올
 
 New-Item -ItemType Directory -Force -Path $DataDir, $Runtime | Out-Null
 
+# 관리자가 준 설치 패키지(zip)로 설치하면 install.bat 이 옆의 cbs-team.env 경로를 넘겨준다.
+# 데이터 폴더로 옮겨 두면 앱이 켤 때 읽어 넣는다(노션 연결 정보·외부 API 키 — 팀 설정 코드를 붙여넣을 필요가 없다).
+if ($env:CBS_TEAM_ENV -and (Test-Path -LiteralPath $env:CBS_TEAM_ENV)) {
+  Copy-Item -LiteralPath $env:CBS_TEAM_ENV -Destination (Join-Path $DataDir 'team.env') -Force
+  Say '팀 설정 파일을 넣었습니다 (노션 연결 정보 · 외부 API 키)'
+}
+
 # 이미 돌고 있으면 먼저 멈춘다 — 실행 중인 node 가 앱 폴더를 잠가 clone 이 '액세스 거부'로 끝난다.
 Step '실행 중인 앱 확인'
 $stopped = $false

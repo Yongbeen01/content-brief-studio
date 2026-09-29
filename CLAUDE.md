@@ -70,6 +70,24 @@ OAuth 연결 자체를 확인할 때만 설치본을 멈추고 4325 로 띄운�
 - **완료 알림**(`web/js/notify.js`): 브라우저 Notification = 윈도우 오른쪽 아래 알림. 소리는 앱이 Web Audio 로 내고 알림은 silent.
   허용 묻기·소리 켜기는 [생성]을 누른 순간에(사용자 동작이 있어야 된다).
 - **Account ID 여러 개**(`web/js/account.js`, 화면·서버 공용): 칸에는 `ID1, @ID2`, Account Tag 에는 `@ID1, @ID2`.
+- **캠페인 고르기**(`src/external/kglowing.js` + 화면 `web/js/campaign.js` — 파이널 리포트 campaign-combo 와 같은 동작):
+  kglowing 외부 API(`X-API-KEY`, `config.externalApi.key`). 목록은 `/api/v1/seeding/campaigns`(200개씩, 전체 7초 → 켤 때 미리 받고
+  5분 지나면 옛 목록을 주며 뒤에서 새로 받는다). **Account ID** = `hashTagAccount` — 태그 감지용 변형 목록이라
+  (`clerivy.global, CLERIVY.GLOBAL, Clerivy,global`) 대소문자·점밑줄만 다른 것과 다른 계정의 조각을 걸러 낸다(`campaignAccounts`).
+  **업로드폼 링크는 API 에 칸이 없다** — 캠페인 메일 템플릿(`/mail-templates`)의 리마인드·땡큐레터 버튼(「Send Your Video Details」)에서 찾는다
+  (`findUploadForm` 점수: 배송 뒤 메일 +, 영상 제출 말 +, 지원·가입 말 −). 템플릿이 `{{google_form_url}}` 변수만 쓰는 캠페인은
+  실제 링크가 API 어디에도 없다 → 화면이 그 칸만 직접 받는다. 키가 없거나 목록을 못 받으면 예전처럼 둘 다 직접 넣는다.
+  폼 값: `inputs.campaign`(고른 캠페인 스냅숏) → `uploadUrl`·`accountId` 는 **쓰일 값**, 직접 넣은 것은 `manualUploadUrl`·`manualAccountId`.
+- **브리프 이름은 받지 않는다**: 작성 결과의 `titleProduct`·`titleConcept`(영어, 스키마 맨 끝 = 내용을 다 쓴 뒤)로
+  `build.js briefTitle` 이 `[BRAND]US_TikTok_<제품> _<컨셉> Guide` 를 만든다. 고치는 곳은 [노션에 최종 생성] 창의 제목 칸뿐.
+  예전 초안의 `inputs.briefName` 은 있으면 그대로 따른다.
+- **필수 칸**: 캠페인(목록을 쓸 수 있을 때)·업로드폼·Account ID·사측 공유 파일(서버도 막는다)·소구점·컨셉.
+  「필수: …」 문구는 없다 — 생성 버튼은 늘 눌리고, 누르면 빈 칸이 번쩍인다(`flashMissing`).
+- **팀 설정 = 설치 파일**(`npm run team-code`): 팀 설정 코드(CBS1, 이제 외부 API 키 `k` 도 싣는다)와 함께
+  `~/.content-brief-studio/team-package/content-brief-studio-install.zip`(install.bat + cbs-team.env + README.txt)을 만든다.
+  install.bat 은 옆의 cbs-team.env 경로를 `CBS_TEAM_ENV` 로 넘기고(한글 폴더 경로도 환경변수라 안전), install.ps1 이 데이터 폴더의
+  `team.env` 로 옮기며, 앱이 켤 때 `applyTeamEnvFile` 로 설정에 넣고 `team.env.applied` 로 이름을 바꾼다.
+  개발 중에는 `CBS_EXTERNAL_API_KEY` 환경변수로 키를 넣는다(파일에 적지 않는다).
 - **레퍼런스 검색**(`src/brief/reference.js`, 문안은 `prompts.js REFERENCE_PROMPT` — CR팀이 준 글 그대로): 스텝 하나 → 틱톡 검색어 15개(sonnet).
   {{step}} 의 칸 이름은 문안이 부르는 [행동]·[화면]·[자막]·[내레이션]·[시간]으로 고정. [새로 고침]만 직전 키워드를 덧붙여 겹치지 않게 한다.
 - `src/claude/` — Claude CLI 호출(구독 로그인, stream-json, --json-schema), JSON 추출.
