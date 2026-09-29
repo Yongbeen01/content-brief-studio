@@ -90,6 +90,13 @@ OAuth 연결 자체를 확인할 때만 설치본을 멈추고 4325 로 띄운�
   개발 중에는 `CBS_EXTERNAL_API_KEY` 환경변수로 키를 넣는다(파일에 적지 않는다).
 - **레퍼런스 검색**(`src/brief/reference.js`, 문안은 `prompts.js REFERENCE_PROMPT` — CR팀이 준 글 그대로): 스텝 하나 → 틱톡 검색어 15개(sonnet).
   {{step}} 의 칸 이름은 문안이 부르는 [행동]·[화면]·[자막]·[내레이션]·[시간]으로 고정. [새로 고침]만 직전 키워드를 덧붙여 겹치지 않게 한다.
+  - **틱톡 다운로더(확장 1.1+) 연결**(`web/js/tiktok-bridge.js`, 확장 쪽은 별도 프로젝트 `Documents\tiktok-video-downloader` 의
+    `src/app-bridge.js`): 확장이 이 화면에 `<html data-ttdl-bridge>` 를 남기면, 검색어를 눌렀을 때 확장이 틱톡 탭을 열고
+    그 탭에 기획서 id·스텝 자리 id·스텝 번호를 기억한다. 그 탭에서 영상을 골라 [Step N GIF 생성]을 누르면 확장이 영상을
+    받아 `POST /api/videos` 로 **직접** 올리고(다운로드 폴더 안 거침, 토큰은 `GET /api/session`), 이 화면에 begin →
+    progress → videos 를 알린다(`video.js fromExtension`). videos 부터는 파일을 올린 것과 같은 큐다. 답(`{ok}`)이 없거나
+    ok 가 아니면 확장이 멈춘다 — 다른 초안이 열려 있거나 그 자리가 처리 중이면 거절, 받는 중 [취소]면 cancelled.
+    확장이 없거나 답이 없으면 검색어는 그냥 새 탭으로 열린다.
 - `src/claude/` — Claude CLI 호출(구독 로그인, stream-json, --json-schema), JSON 추출.
 - `src/sources/` — 사측 공유 파일 읽기(docx·pptx·xlsx 는 의존성 없는 ZIP/XML 파서, PDF 는 Claude 가 직접 읽음, 노션 링크).
   사진도 같이 꺼낸다: `images.js`(추려내기)·`pdf-images.js`(PDF 안의 사진 객체 → JPEG 그대로 / PNG 로 다시 포장,

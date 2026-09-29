@@ -14,9 +14,12 @@ import { getAt, imageSlots, setAt } from './doc.js';
  * - **Claude 처리는 한 줄로.** 올리기가 끝난 순서대로 큐에 서서 하나씩 돈다(구독 한도·캐시 때문).
  *   기다리는 상자에는 「앞에 N개」가 보인다.
  * - 자리(경로)는 작업 도중에 밀릴 수 있어 **노드 id 로 다시 찾는다**.
+ * - **틱톡 다운로더(확장)에서도 영상이 온다**(fromExtension). 레퍼런스 검색으로 연 틱톡 탭에서 [Step N GIF 생성]을
+ *   누르면 확장이 영상을 서버에 직접 올리고 여기로 알린다 — 올리기 대신 「틱톡에서 받는 중」을 거쳐 같은 큐에 선다.
  */
 
 const PHASE_LABEL = {
+  receiving: '틱톡에서 영상 받는 중',
   uploading: '영상 올리는 중',
   queued: '차례 기다리는 중',
   working: '처리 중',
@@ -301,19 +304,80 @@ export function createVideoPanel({ root, getDoc, getDraftId, commit, toast, onRe
         onXhr: (xhr) => jobs.get(nodeId)?.xhrs.push(xhr),
         onProgress: (p) => { progress[i] = p; show(); },
       })));
-      const seen = new Set();
-      const unique = videos.filter((v) => (seen.has(v.id) ? false : seen.add(v.id)));
-      update(nodeId, {
-        videos: unique, phase: 'queued', pct: 0, detail: '', xhrs: [], label: unique.map((v) => v.name).join(', '),
-      });
-      queue.push(nodeId);
-      paint();
-      pump();
+      enqueue(nodeId, videos);
     } catch (e) {
       if (e.cancelled) jobs.delete(nodeId);
       else update(nodeId, { phase: 'error', error: e.message });
       paint();
     }
+  }
+
+  /** 서버에 올라간 영상으로 Claude 처리 차례를 선다 — 파일을 올렸든 확장이 보냈든 여기부터 같다. */
+  function enqueue(nodeId, videos) {
+    const seen = new Set();
+    const unique = videos.filter((v) => (seen.has(v.id) ? false : seen.add(v.id)));
+    update(nodeId, {
+      videos: unique, phase: 'queued', pct: 0, detail: '', xhrs: [], label: unique.map((v) => v.name).join(', '),
+    });
+    queue.push(nodeId);
+    paint();
+    pump();
+  }
+
+  // ── 틱톡 다운로더(확장)에서 오는 영상 ─────────────────────────────────────
+
+  /**
+   * 틱톡 검색 탭의 [Step N GIF 생성] — 확장이 영상을 받아 서버에 직접 올리고(`POST /api/videos`), 여기는 소식만 받는다.
+   * begin(받기 시작) → progress → videos(다 올림) | fail. videos 가 오면 파일을 골라 올린 것과 똑같이 큐에 선다.
+   * 돌려주는 값이 확장에 가는 답이다 — ok 가 아니면 확장은 거기서 멈추고 틱톡 탭에 error 를 보여 준다.
+   */
+  function fromExtension(ev) {
+    const nodeId = String(ev.slotId ?? '');
+    const where = ev.step ? `Step ${ev.step}` : '이 스텝';
+    const job = jobs.get(nodeId);
+    if (String(ev.draftId ?? '') !== String(getDraftId())) {
+      const error = '브리프 생성기에 다른 기획서가 열려 있습니다. 레퍼런스 검색을 연 기획서로 돌아간 뒤 다시 눌러 주세요.';
+      if (job?.phase === 'receiving') update(nodeId, { phase: 'error', error });
+      return { ok: false, error };
+    }
+    if (ev.kind === 'begin') {
+      const path = pathOf(getDoc(), nodeId);
+      if (!path) return { ok: false, error: `${where} 자리를 기획서에서 찾지 못했습니다.` };
+      if (job && job.phase !== 'found' && job.phase !== 'error') {
+        return { ok: false, error: `${where} 자리는 아직 영상을 처리하고 있습니다. 끝난 뒤 다시 눌러 주세요.` };
+      }
+      const total = Math.max(1, Number(ev.total) || 1);
+      menus.delete(nodeId);
+      jobs.set(nodeId, {
+        nodeId, label: `틱톡 영상 ${total}개`, phase: 'receiving', pct: 0, detail: `1/${total}`, path, xhrs: [], videos: [], total,
+      });
+      paint();
+      return { ok: true };
+    }
+    // 받는 도중에 상자에서 [취소]를 눌렀다 — 확장은 남은 영상을 보내지 않는다.
+    if (job?.phase !== 'receiving') return { ok: false, cancelled: true };
+    if (ev.kind === 'progress') {
+      const i = Math.max(0, Number(ev.index) || 0);
+      const pct = Math.max(0, Math.min(1, Number(ev.pct) || 0));
+      update(nodeId, { pct: ((i + pct) / job.total) * 0.98, detail: `${Math.min(i + 1, job.total)}/${job.total}` });
+      return { ok: true };
+    }
+    if (ev.kind === 'videos') {
+      const videos = (ev.videos ?? []).filter((v) => v && typeof v.id === 'string');
+      if (!videos.length) {
+        update(nodeId, { phase: 'error', error: '틱톡에서 받은 영상이 없습니다.' });
+        return { ok: true };
+      }
+      enqueue(nodeId, videos);
+      root.querySelector(`[data-slot-id="${CSS.escape(nodeId)}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      toast(`틱톡 영상 ${videos.length}개를 받았습니다 — ${where} 참고 GIF 를 만듭니다`);
+      return { ok: true };
+    }
+    if (ev.kind === 'fail') {
+      update(nodeId, { phase: 'error', error: ev.error || '틱톡에서 영상을 받지 못했습니다.' });
+      return { ok: true };
+    }
+    return { ok: false, error: 'unknown' };
   }
 
   async function pump() {
@@ -438,6 +502,7 @@ export function createVideoPanel({ root, getDoc, getDraftId, commit, toast, onRe
   return {
     toggle,
     paint,
+    fromExtension,
     /** 영상 일이 돌고 있는가 — 게시 전에 물어본다. */
     busyCount: () => [...jobs.values()].filter((j) => j.phase !== 'found' && j.phase !== 'error').length,
   };

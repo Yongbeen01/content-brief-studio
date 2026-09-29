@@ -9,6 +9,7 @@ import { renderDoc, setInline } from './preview.js';
 import { createEditor } from './editor.js';
 import { englishLabel, placeholderBlob, uploadImage } from './slots.js';
 import { createVideoPanel } from './video.js';
+import { askExtension, extensionVersion, onExtensionEvent } from './tiktok-bridge.js';
 import {
   accountTag, accountValue, badAccountIds, formatAccountInput,
 } from './account.js';
@@ -1589,6 +1590,7 @@ function renderRef(keywords) {
     a.target = '_blank';
     a.rel = 'noopener noreferrer';
     a.title = '틱톡 검색을 새 탭으로 엽니다';
+    a.addEventListener('click', (e) => openRefSearch(e, a.href));
     const n = document.createElement('span');
     n.className = 'ref-n';
     n.textContent = String(i + 1);
@@ -1603,6 +1605,19 @@ function renderRef(keywords) {
     li.append(a);
     return li;
   }));
+}
+
+/**
+ * 검색어 링크 — 틱톡 다운로더(확장 1.1 이상)가 깔려 있으면 확장에게 탭을 열게 한다. 그 탭은 이 기획서·스텝 자리를
+ * 기억해 두고, 거기서 고른 영상을 [Step N GIF 생성]으로 이 자리에 바로 보낸다(web/js/tiktok-bridge.js).
+ * 확장이 없거나 답하지 않으면 링크 그대로 새 탭으로 연다(누른 직후라 팝업 차단에 걸리지 않는다).
+ */
+async function openRefSearch(e, url) {
+  const t = refTarget;
+  if (!t || !extensionVersion() || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+  e.preventDefault();
+  const r = await askExtension('openSearch', { url, ctx: { draftId: state.draft.id, slotId: t.slotId, step: t.step } });
+  if (!r?.ok) window.open(url, '_blank', 'noopener');
 }
 
 function fetchKeywords(doc, stepId, key, previous) {
@@ -1680,8 +1695,11 @@ function openReference(slotId) {
   const step = (doc?.nodes ?? []).find((n) => n.type === 'step' && n.image?.id === slotId);
   if (!step) return toast('이 스텝을 문서에서 찾지 못했습니다', true);
   const tl = stepTimeline(doc).steps.get(step.id);
-  refTarget = { stepId: step.id, key: refKey(doc, step) };
-  $('ref_where').textContent = `「${inline.plain(stepTitle(step, tl, docLang(doc)))}」 장면이 담긴 틱톡 영상을 찾는 검색어입니다. 누르면 틱톡 검색이 새 탭으로 열립니다.`;
+  refTarget = { stepId: step.id, key: refKey(doc, step), slotId, step: tl?.index ?? 0 };
+  const scene = `「${inline.plain(stepTitle(step, tl, docLang(doc)))}」 장면이 담긴 틱톡 영상을 찾는 검색어입니다.`;
+  $('ref_where').textContent = extensionVersion()
+    ? `${scene} 누르면 틱톡 검색이 새 탭으로 열리고, 거기서 영상을 골라 [Step ${refTarget.step} GIF 생성]을 누르면 이 자리로 바로 들어옵니다.`
+    : `${scene} 누르면 틱톡 검색이 새 탭으로 열립니다.`;
   $('ref_list').replaceChildren();
   setStatus('ref_status', '');
   $('ref_refresh').disabled = false;
@@ -1845,6 +1863,8 @@ function wire() {
     toast,
     onReference: openReference,
   });
+  // 틱톡 탭의 [Step N GIF 생성] — 확장이 서버에 올린 영상을 그 스텝 상자로 받는다.
+  onExtensionEvent((ev) => videoPanel.fromExtension(ev));
 
   editor = createEditor({
     root: $('doc'),
