@@ -28,16 +28,23 @@
       <section class="col-form">
         <!-- 아카이브 — [생성]이 끝날 때마다 그때의 입력과 결과가 한 건씩 쌓인다(파이널 리포트의 실행 기록과 같은 모양).
              누르면 그 입력이 폼에 다시 채워지고 만든 기획서가 미리보기에 열린다. 펼친 목록은 아래 폼 위에 뜬다. -->
-        <details class="fx-history" id="archive">
-          <summary>
-            <span class="fx-history-title">아카이브</span>
-            <span class="fx-chip" id="archive_count"></span>
-            <svg class="fx-chevron" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </summary>
-          <div class="fx-history-body">
-            <div class="history-list" id="archive_list"></div>
-          </div>
-        </details>
+        <div class="fx-topline">
+          <details class="fx-history" id="archive">
+            <summary>
+              <span class="fx-history-title">아카이브</span>
+              <span class="fx-chip" id="archive_count"></span>
+              <svg class="fx-chevron" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </summary>
+            <div class="fx-history-body">
+              <div class="history-list" id="archive_list"></div>
+            </div>
+          </details>
+          <!-- 틱톡 다운로더(크롬 확장) — 설치는 케비서 운영의 프로그램 다운로드 센터에서 한다. 새 탭으로 연다(이 앱 화면은 그대로). -->
+          <a class="fx-tt-btn" id="tt_install_btn" href="https://kglowingai.com/download-center" target="_blank" rel="noopener" title="케비서 프로그램 다운로드 센터에서 틱톡 다운로더를 설치합니다">
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 2.5v7.5M4.8 7L8 10.2 11.2 7M3 13.2h10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            틱톡 다운로더 설치
+          </a>
+        </div>
 
         <div class="card" id="form_section">
           <div class="mode-tabs" id="mode_tabs" role="tablist" aria-label="만드는 방법">

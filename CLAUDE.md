@@ -119,6 +119,9 @@ OAuth 연결 자체를 확인할 때만 설치본을 멈추고 4325 로 띄운�
   조각마다 크기·fps 를 맞춘 뒤 concat 한다(`media/ffmpeg.js` 의 `stitch`) — 필터 하나로 묶으면 크기가
   다른 영상에서 조용히 깨진다. 길이는 조각 1.5~6초·전체 12초까지로 코드가 자른다.
 - `src/notion/` — OAuth(파이널 리포트 공개 통합 재사용), 쓰기 가드, 블록 변환, 게시.
+- **틱톡 다운로더**(아카이브 오른쪽 [틱톡 다운로더 설치]): 케비서 **운영** 프로그램 다운로드 센터
+  (`https://kglowingai.com/download-center`)를 새 탭으로 여는 링크일 뿐이다. 확장(별도 프로젝트
+  `Documents\tiktok-video-downloader`)의 배포본은 이 레포에 넣지 않는다 — 공개 레포라 넣으면 공개된다.
 - `web/` — Final Report 플러그인과 같은 모양의 화면(빌드 없음).
 - 데이터: `~/.content-brief-studio/` (`CBS_DIR` 로 바꿀 수 있음).
 

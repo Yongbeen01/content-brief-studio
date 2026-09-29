@@ -570,6 +570,20 @@ details.card[open] > summary .fx-chevron { transform: rotate(180deg); }
 .publish-title label { margin: 0; font-size: 0.8rem; color: var(--fx-text-weak); }
 .publish-title input { background: #fff; }
 
+/* ── 맨 위 줄: 아카이브 + 틱톡 다운로더 설치 ──
+   아카이브를 static 으로 풀어 펼친 목록이 이 줄 전체 폭을 쓰게 한다(버튼 몫만큼 좁아지지 않게). */
+.fx-topline { position: relative; z-index: 25; display: flex; gap: 8px; align-items: stretch; margin-bottom: 10px; }
+.fx-topline > .fx-history { position: static; z-index: auto; flex: 1 1 auto; min-width: 0; margin-bottom: 0; }
+.fx-tt-btn {
+  flex: none; display: inline-flex; align-items: center; gap: 6px;
+  padding: 9px 14px; border: 0; border-radius: var(--fx-r-lg);
+  background: var(--fx-card); color: var(--fx-text); text-decoration: none;
+  font: inherit; font-size: 0.93rem; font-weight: 600; white-space: nowrap; cursor: pointer;
+}
+.fx-tt-btn:hover { background: var(--fx-fill-hover); }
+.fx-tt-btn:focus-visible { outline: 0; box-shadow: var(--fx-focus); }
+.fx-tt-btn svg { flex: none; color: var(--fx-blue); }
+
 /* ── 레퍼런스 검색 — 누르면 틱톡 검색이 새 탭으로 ─────────── */
 .ref-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .ref-list:empty { display: none; }
