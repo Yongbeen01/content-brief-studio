@@ -96,7 +96,9 @@ OAuth 연결 자체를 확인할 때만 설치본을 멈추고 4325 로 띄운�
     받아 `POST /api/videos` 로 **직접** 올리고(다운로드 폴더 안 거침, 토큰은 `GET /api/session`), 이 화면에 begin →
     progress → videos 를 알린다(`video.js fromExtension`). videos 부터는 파일을 올린 것과 같은 큐다. 답(`{ok}`)이 없거나
     ok 가 아니면 확장이 멈춘다 — 다른 초안이 열려 있거나 그 자리가 처리 중이면 거절, 받는 중 [취소]면 cancelled.
-    확장이 없거나 답이 없으면 검색어는 그냥 새 탭으로 열린다.
+    확장이 없거나 답이 없으면 검색어는 그냥 새 탭으로 열린다. Ctrl·가운데 클릭도 확장에 맡긴다(`background` — 뒤쪽 탭) —
+    브라우저가 그냥 열면 그 탭은 어느 스텝인지 몰라 버튼이 안 뜬다. 설치·업데이트 전부터 열린 이 화면에는 확장(1.1.1~)이
+    연결 스크립트를 직접 넣어 준다(새로고침 불필요).
 - `src/claude/` — Claude CLI 호출(구독 로그인, stream-json, --json-schema), JSON 추출.
 - `src/sources/` — 사측 공유 파일 읽기(docx·pptx·xlsx 는 의존성 없는 ZIP/XML 파서, PDF 는 Claude 가 직접 읽음, 노션 링크).
   사진도 같이 꺼낸다: `images.js`(추려내기)·`pdf-images.js`(PDF 안의 사진 객체 → JPEG 그대로 / PNG 로 다시 포장,

@@ -1661,6 +1661,7 @@ function renderRef(keywords) {
     a.rel = 'noopener noreferrer';
     a.title = '틱톡 검색을 새 탭으로 엽니다';
     a.addEventListener('click', (e) => openRefSearch(e, a.href));
+    a.addEventListener('auxclick', (e) => openRefSearch(e, a.href)); // 가운데 버튼
     const n = document.createElement('span');
     n.className = 'ref-n';
     n.textContent = String(i + 1);
@@ -1681,12 +1682,17 @@ function renderRef(keywords) {
  * 검색어 링크 — 틱톡 다운로더(확장 1.1 이상)가 깔려 있으면 확장에게 탭을 열게 한다. 그 탭은 이 기획서·스텝 자리를
  * 기억해 두고, 거기서 고른 영상을 [Step N GIF 생성]으로 이 자리에 바로 보낸다(web/js/tiktok-bridge.js).
  * 확장이 없거나 답하지 않으면 링크 그대로 새 탭으로 연다(누른 직후라 팝업 차단에 걸리지 않는다).
+ * Ctrl·가운데 클릭(검색어 여러 개를 뒤쪽 탭으로 한꺼번에 열 때)도 확장에게 맡긴다 — 브라우저가 그냥 열면
+ * 그 탭은 어느 스텝인지 몰라 [Step N GIF 생성]이 안 뜬다. Shift(새 창)·Alt 는 브라우저에 맡긴다.
  */
 async function openRefSearch(e, url) {
   const t = refTarget;
-  if (!t || !extensionVersion() || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+  if (!t || !extensionVersion() || e.shiftKey || e.altKey || (e.button !== 0 && e.button !== 1)) return;
+  const background = e.button === 1 || e.ctrlKey || e.metaKey;
   e.preventDefault();
-  const r = await askExtension('openSearch', { url, ctx: { draftId: state.draft.id, slotId: t.slotId, step: t.step } });
+  const r = await askExtension('openSearch', {
+    url, background, ctx: { draftId: state.draft.id, slotId: t.slotId, step: t.step },
+  });
   if (!r?.ok) window.open(url, '_blank', 'noopener');
 }
 
