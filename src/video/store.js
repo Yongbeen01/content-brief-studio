@@ -9,7 +9,8 @@ import { DIRS, config, ensureDirs } from '../config.js';
  *
  *   meta.json  이름·길이·상태 · source.mp4  (2분 넘으면 앞부분만 잘라 둔 것)
  *   sheets/    프레임 격자 · frames.json  화면 설명(영상당 한 번, 영구 재사용)
- *   speech.json  받아쓰기 · previews/  후보 미리보기 mp4
+ *   speech.json  받아쓰기 · cuts.json  장면이 바뀌는 시각 · previews/  후보 미리보기 mp4
+ *   (frames.json 을 만든 방식은 meta 의 describeVersion — 방식이 바뀌면 다시 읽는다)
  *
  * **frames.json 이 이 기능의 비용 설계다** — 같은 영상으로 GIF 를 여러 개 만들어도 화면 설명은 한 번만 만든다.
  * 완성된 GIF 는 사진첩(assets)으로 복사되므로, 영상 폴더를 지워도 문서는 멀쩡하다.
@@ -24,7 +25,7 @@ const mem = new Map();
 export const videoDir = (id) => (safeId(id) ? dirOf(id) : '');
 export const sourcePath = (id) => path.join(dirOf(id), 'source.mp4');
 export const sheetsDir = (id) => path.join(dirOf(id), 'sheets');
-/** 미리보기 이름: 한 구간짜리는 s1·s2·s3, 이어 붙인 것은 seq. */
+/** 미리보기 이름: 실행 표시 3자 + 한 구간짜리는 s1·s2·s3, 이어 붙인 것은 seq (예: k3xs1·k3xseq — clip.js). */
 export const previewPath = (id, name) => (/^[a-z0-9]{1,6}$/.test(String(name))
   ? path.join(dirOf(id), 'previews', `${name}.mp4`)
   : '');
@@ -125,6 +126,7 @@ export async function receiveVideo(stream, { name, draftId = '' }) {
   const tmp = uploadTmp(name);
   const hash = crypto.createHash('sha256');
   let size = 0;
+  const out = fs.createWriteStream(tmp);
   try {
     await pipeline(stream, async function* measure(src) {
       for await (const chunk of src) {
@@ -132,8 +134,16 @@ export async function receiveVideo(stream, { name, draftId = '' }) {
         size += chunk.length;
         yield chunk;
       }
-    }, fs.createWriteStream(tmp));
+    }, out);
   } catch (e) {
+    // 파일은 비동기로 열린다 — 받자마자 끊기면 열기보다 지우기가 먼저 돌아 빈 임시 파일이 남는다.
+    // 닫힐 때까지 기다렸다 지운다.
+    if (!out.closed) {
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, 5000); // 안 닫히는 일은 없어야 하지만, 요청이 영영 매달리지는 않게
+        out.once('close', () => { clearTimeout(timer); resolve(); });
+      });
+    }
     fs.rmSync(tmp, { force: true });
     throw e;
   }
@@ -177,6 +187,13 @@ const readJson = (file, fallback) => {
 
 export const readFrames = (id) => readJson(path.join(dirOf(id), 'frames.json'), null);
 export const readSpeech = (id) => readJson(path.join(dirOf(id), 'speech.json'), null);
+/** 장면이 바뀌는 시각(초). 없으면 빈 배열 — 경계를 안 옮길 뿐 고르기는 된다. */
+export const readCuts = (id) => readJson(path.join(dirOf(id), 'cuts.json'), []);
+
+export function writeCuts(id, cuts) {
+  fs.writeFileSync(path.join(dirOf(id), 'cuts.json'), JSON.stringify(cuts), 'utf8');
+  return cuts;
+}
 
 export function writeFrames(id, frames) {
   fs.writeFileSync(path.join(dirOf(id), 'frames.json'), JSON.stringify(frames), 'utf8');

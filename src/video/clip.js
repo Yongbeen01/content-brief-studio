@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { makeGifWithin, previewMp4, probe, stitch } from '../media/ffmpeg.js';
@@ -37,7 +38,9 @@ async function joinParts(parts, dest, { workDir, signal }) {
 export async function makePreviews({ videoIds, singles, sequence, workDir, signal, onProgress = () => {} }) {
   const home = path.join(videoDir(videoIds[0]), 'previews');
   fs.mkdirSync(home, { recursive: true });
-  const url = (name) => `/api/videos/${videoIds[0]}/preview/${name}`;
+  // 이름에 이번 실행 표시를 붙인다 — 같은 영상을 다른 스텝에서 또 고르면 s1·seq 가 덮이고,
+  // 주소가 같아 브라우저가 앞 스텝의 미리보기를 캐시로 보여 줬다.
+  const run = crypto.randomBytes(2).toString('hex').slice(0, 3);
   const total = (singles?.length ?? 0) + (sequence ? 1 : 0);
   let done = 0;
   const tick = (detail) => onProgress({ phase: 'preview', detail, done: done++, total });
@@ -45,20 +48,35 @@ export async function makePreviews({ videoIds, singles, sequence, workDir, signa
   const outSingles = [];
   for (const [i, c] of (singles ?? []).entries()) {
     tick(`미리보기 만드는 중 (${done + 1}/${total})`);
-    const name = `s${i + 1}`;
+    const name = `${run}s${i + 1}`;
     await previewMp4(fileOf(c.videoId), previewPath(videoIds[0], name), { start: c.start, end: c.end, signal });
-    outSingles.push({ ...c, preview: url(name) });
+    outSingles.push({ ...c, preview: previewUrl(videoIds[0], name) });
   }
 
   let outSequence = null;
   if (sequence) {
     tick('이어 붙인 미리보기 만드는 중');
-    const joined = path.join(workDir, 'seq.mp4');
-    const j = await joinParts(sequence.parts, joined, { workDir: path.join(workDir, 'seq-parts'), signal });
-    await previewMp4(j.file, previewPath(videoIds[0], 'seq'), { start: j.start, end: j.end, signal });
-    outSequence = { ...sequence, preview: url('seq') };
+    const preview = await seqPreview({ videoIds, parts: sequence.parts, name: `${run}seq`, workDir, signal });
+    outSequence = { ...sequence, preview };
   }
   return { singles: outSingles, sequence: outSequence };
+}
+
+const previewUrl = (videoId, name) => `/api/videos/${videoId}/preview/${name}`;
+/** 미리보기 주소 → 파일(실제 장면 확인이 미리보기로 격자를 만든다). */
+export const previewFileOf = (url) => {
+  const m = /^\/api\/videos\/([^/]+)\/preview\/([a-z0-9]{1,6})$/.exec(String(url ?? ''));
+  return m ? previewPath(m[1], m[2]) : '';
+};
+
+/**
+ * 이어 붙인 후보의 미리보기. 실제 장면 확인에서 안 맞는 조각을 뺐을 때 같은 이름으로 다시 만든다(tag 로 작업 폴더만 나눈다).
+ * @returns {Promise<string>} 미리보기 주소
+ */
+export async function seqPreview({ videoIds, parts, name, workDir, signal, tag = 'seq' }) {
+  const j = await joinParts(parts, path.join(workDir, `${tag}.mp4`), { workDir: path.join(workDir, `${tag}-parts`), signal });
+  await previewMp4(j.file, previewPath(videoIds[0], name), { start: j.start, end: j.end, signal });
+  return previewUrl(videoIds[0], name);
 }
 
 /**

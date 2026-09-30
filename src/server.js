@@ -14,8 +14,9 @@ import { generateBrief, findPartnershipPage } from './brief/generate.js';
 import { referenceKeywords } from './brief/reference.js';
 import * as videos from './video/store.js';
 import { prepareVideo } from './video/prepare.js';
-import { matchClip } from './video/match.js';
+import { matchClip, stepSummary } from './video/match.js';
 import { makeClipAsset, makePreviews } from './video/clip.js';
+import { verifyPicks } from './video/verify.js';
 import { toolsStatus } from './media/tools.js';
 import { runEdit, runInsert } from './brief/edit.js';
 import { translateDoc } from './brief/translate.js';
@@ -328,6 +329,7 @@ async function handleApi(req, res, url) {
     return json(res, 200, { jobId: job.id });
   }
   // 영상 하나 이상 + 이 스텝 → 한 구간짜리 후보 3개와, 필요하면 이어 붙이기 제안
+  // → 미리보기 → 고른 장면을 실제 화면으로 확인(설명 글만 보고 골랐으니까). 확인이 실패해도 결과는 준다.
   if (m === 'POST' && p === '/api/videos/match') {
     const body = await readJson(req, 16 * 1024 * 1024);
     const videoIds = (body.videoIds ?? []).filter((x) => typeof x === 'string');
@@ -339,7 +341,23 @@ async function handleApi(req, res, url) {
       const withPreview = await makePreviews({
         videoIds, singles: found.singles, sequence: found.sequence, workDir: dir, signal, onProgress: progress,
       });
-      return { ...withPreview, usage: found.usage };
+      let checked = { ...withPreview, verified: false };
+      try {
+        checked = await verifyPicks({
+          videoIds, ...withPreview, step: stepSummary(body.doc, body.path), workDir: dir, signal, onProgress: progress,
+        });
+      } catch (e) {
+        if (signal?.aborted) throw e;
+        checked.verifyError = String(e.message ?? e).slice(0, 200);
+      }
+      return {
+        singles: checked.singles,
+        sequence: checked.sequence,
+        verified: checked.verified,
+        verifyError: checked.verifyError ?? '',
+        videoNotes: found.videoNotes ?? [],
+        usage: found.usage,
+      };
     });
     return json(res, 200, { jobId: job.id });
   }

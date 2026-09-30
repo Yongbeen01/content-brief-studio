@@ -38,16 +38,18 @@ const DEFAULTS = {
 
   /**
    * 작성은 품질이 먼저라 opus, 편집은 기다림이 짧아야 해서 sonnet.
-   * 영상: 화면 설명은 영상당 한 번뿐이고 양이 많아 haiku, 구간 고르기는 판단이 결과 품질이라 opus.
+   * 영상: 화면 설명은 sonnet — haiku 는 격자 칸을 제대로 못 읽고 장면을 지어냈다(2026-09-30, 자막까지 뚜렷한
+   * 「패드 적시기」 장면을 「목에 톡톡」으로 적어 구간 고르기가 엉뚱한 조각을 골랐다). 구간 고르기는 판단이 결과 품질이라 opus,
+   * 고른 조각을 실제 장면으로 한 번 더 보는 확인은 sonnet.
    * 기존 브리프 PDF 옮겨 적기는 판단이 아니라 베끼기라 sonnet(빠르다).
    * 레퍼런스 검색어는 창을 띄워 놓고 기다리는 일이라 sonnet(몇 초).
    * 별칭(opus/sonnet/haiku)은 CLI 가 그때그때 최신 모델로 푼다.
    */
   models: {
-    compose: 'opus', edit: 'sonnet', translate: 'opus', frames: 'claude-haiku-4-5', match: 'claude-opus-5', importPdf: 'sonnet', reference: 'sonnet',
+    compose: 'opus', edit: 'sonnet', translate: 'opus', frames: 'sonnet', match: 'claude-opus-5', verify: 'sonnet', importPdf: 'sonnet', reference: 'sonnet',
   },
   timeouts: {
-    composeMs: 8 * 60_000, editMs: 3 * 60_000, framesMs: 8 * 60_000, matchMs: 4 * 60_000, mediaMs: 10 * 60_000, referenceMs: 2 * 60_000,
+    composeMs: 8 * 60_000, editMs: 3 * 60_000, framesMs: 8 * 60_000, matchMs: 4 * 60_000, verifyMs: 3 * 60_000, mediaMs: 10 * 60_000, referenceMs: 2 * 60_000,
   },
 
   /** 영상 → 참고 GIF */
@@ -60,6 +62,14 @@ const DEFAULTS = {
     partMinSec: 1.5,
     partMaxSec: 6,
     seqMaxSec: 12,
+    // 화면 설명은 격자 몇 장씩 나눠 동시에 읽힌다 — 2분 영상 10장을 한 번에 주면 기다림이 두 배가 넘는다
+    describeChunkSheets: 4,
+    describeParallel: 3,
+    // 고른 후보 확인도 후보마다 따로 동시에
+    verifyParallel: 4,
+    // 조각 경계를 장면이 바뀌는 곳에 붙인다 — 1초에 한 장씩 읽어 경계가 1초쯤 어긋나기 때문
+    sceneThreshold: 0.3,
+    cutSnapSec: 1,
     gifWidth: 480,
     gifFps: 12,
     gifMaxBytes: 8 * 1024 * 1024, // 넘으면 품질을 낮춰 다시 만든다

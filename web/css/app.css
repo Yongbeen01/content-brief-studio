@@ -683,7 +683,14 @@ details.card[open] > summary .fx-chevron { transform: rotate(180deg); }
 .clip-seq { grid-column: 1 / -1; flex-direction: row; gap: 12px; border-color: var(--fx-blue-weaker); background: var(--fx-blue-weakest); }
 .clip-seq video { width: 240px; flex: none; }
 .clip-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1 1 auto; }
-.clip-parts { font-size: 0.75rem !important; color: var(--fx-text-weaker) !important; }
+.clip-parts { font-size: 0.75rem !important; color: var(--fx-text-weaker) !important; flex: none !important; }
+.clip-parts.bad { color: var(--fx-error) !important; }
+.clip-cand.weak { opacity: 0.72; }
+.clip-seen { font-size: 0.75rem !important; color: var(--fx-text) !important; flex: none !important; }
+.clip-videos { margin: -4px 0 10px; padding: 8px 12px; list-style: none; display: flex; flex-direction: column; gap: 3px;
+  font-size: 0.8rem; color: var(--fx-text-weak); background: var(--fx-sunken); border-radius: var(--fx-r-sm); }
+.clip-videos b { color: var(--fx-text); font-weight: 600; }
+.clip-videos li.unused b { color: var(--fx-warning); }
 .clip-manual select { width: auto; max-width: 180px; }
 .clip-cand b { font-size: 0.8rem; }
 .clip-cand span { font-size: 0.8rem; color: var(--fx-text-weak); line-height: 1.4; flex: 1 1 auto; }

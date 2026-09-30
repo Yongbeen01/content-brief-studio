@@ -54,12 +54,36 @@ export async function makeSheets(src, dir, { size, ...opts } = {}) {
   return { files, grid };
 }
 
-/** 격자 읽는 법 — 프롬프트에 그대로 들어간다(모델이 초를 헷갈리지 않게). */
-export function gridRule(grid, sheets, durationSec) {
-  return `Each sheet is a ${grid.cols}x${grid.rows} grid of ${CELLS} frames, one frame per second.
+/**
+ * 격자 읽는 법 — 프롬프트에 그대로 들어간다(모델이 초를 헷갈리지 않게).
+ * 나눠 읽힐 때(`part`)도 격자 번호는 영상 전체 기준 그대로 쓴다 — 초 계산이 한 가지로 남는다.
+ * @param {{first:number,last:number}} [part]  이번에 주는 격자 번호(1부터, 양끝 포함)
+ */
+export function gridRule(grid, sheets, durationSec, part = null) {
+  const first = part?.first ?? 1;
+  const last = part?.last ?? sheets;
+  const head = `Each sheet is a ${grid.cols}x${grid.rows} grid of ${CELLS} frames, one frame per second.
 Read the cells left to right, then top to bottom. Sheet ${'N'} cell ${'k'} (both 1-based) is second (N-1)*${CELLS} + (k-1).
-So sheet 1 cell 1 = 0s, sheet 1 cell ${CELLS} = ${CELLS - 1}s, sheet 2 cell 1 = ${CELLS}s.
+So sheet 1 cell 1 = 0s, sheet 1 cell ${CELLS} = ${CELLS - 1}s, sheet 2 cell 1 = ${CELLS}s.`;
+  if (first === 1 && last === sheets) {
+    return `${head}
 There are ${sheets} sheets and the video is ${Math.round(durationSec)}s long; the last sheet may have empty cells at the end — ignore those.`;
+  }
+  const from = cellSeconds(first, 1);
+  const to = Math.min(Math.round(durationSec), cellSeconds(last, CELLS) + 1) - 1;
+  return `${head}
+The video is ${Math.round(durationSec)}s long (${sheets} sheets). You are given only sheets ${first}–${last}, which is ${from}s–${to}s.
+Sheet numbers are for the whole video, so sheet ${first} cell 1 = ${from}s. Describe only ${from}s–${to}s; empty cells at the end — ignore those.`;
+}
+
+/** 격자 파일들을 size 장씩 묶는다. first·last 는 영상 전체 기준 격자 번호(1부터). */
+export function chunkSheets(files, size) {
+  const n = Math.max(1, Math.round(size) || 1);
+  const out = [];
+  for (let i = 0; i < files.length; i += n) {
+    out.push({ files: files.slice(i, i + n), first: i + 1, last: Math.min(files.length, i + n) });
+  }
+  return out;
 }
 
 export const framesPerVideo = (durationSec) => Math.min(config.media.maxVideoSec, Math.round(durationSec));

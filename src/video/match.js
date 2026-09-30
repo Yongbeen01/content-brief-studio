@@ -4,7 +4,7 @@ import { runClaude } from '../claude/cli.js';
 import { extractJsonObject } from '../claude/json.js';
 import { fixEscapes, validate } from '../brief/schema.js';
 import { MATCH_SCHEMA, matchSystem, matchUser } from './prompts.js';
-import { getVideo, readFrames, readSpeech } from './store.js';
+import { getVideo, readCuts, readFrames, readSpeech } from './store.js';
 import { chromeText } from '../../web/js/chrome.js';
 import { durationText, getAt, stepTimeline, stepTitle } from '../../web/js/doc.js';
 
@@ -17,7 +17,9 @@ import { durationText, getAt, stepTimeline, stepTitle } from '../../web/js/doc.j
  * - `sequence`: 한 구간으로 다 담기지 않을 때 **여러 구간을 순서대로 이어 붙이는** 제안.
  *   영상을 여러 개 올렸으면 조각이 서로 다른 영상에서 올 수도 있다.
  *
- * 돌려받은 구간은 **코드로 다시 다듬는다**(길이·범위·중복) — 모델 말을 그대로 자르지 않는다.
+ * 돌려받은 구간은 **코드로 다시 다듬는다**(길이·범위·중복·장면 전환에 경계 맞추기) — 모델 말을 그대로 자르지 않는다.
+ * 조각마다 스텝의 몇 번 행동을 보여 주는지(`covers`), 영상이 여럿이면 영상마다 무엇이 있는지(`videoNotes`)도 받는다.
+ * 이렇게 고른 것은 설명 글만 보고 고른 것이라, 서버가 미리보기를 만든 뒤 실제 장면으로 한 번 더 확인한다(verify.js).
  */
 
 /** 사진 자리 경로 → 그 스텝을 사람이 읽는 글로. 이 글이 고르기의 기준이다. */
@@ -26,11 +28,16 @@ export function stepSummary(doc, p) {
   if (node?.type !== 'step') return '(스텝 정보를 찾지 못했습니다 — 영상에서 가장 또렷하게 제품이 보이는 구간)';
   const tl = stepTimeline(doc).steps.get(node.id);
   const L = (k) => chromeText(k, 'ko');
-  const join = (arr) => (arr ?? []).map((s) => String(s).replace(/\s+/g, ' ').trim()).filter(Boolean).join(' / ');
+  const clean = (arr) => (arr ?? []).map((s) => String(s).replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const join = (arr) => clean(arr).join(' / ');
+  // 행동은 번호를 붙인다 — 이어 붙일 조각마다 「몇 번 행동을 보여 주는지」를 이 번호로 받는다.
+  const actions = clean(node.action);
   const lines = [
     `제목: ${stepTitle(node, tl)}`,
     `길이: ${tl ? durationText(tl) : `${node.seconds}초`}`,
-    `${L('stepAction')}: ${join(node.action)}`,
+    actions.length > 1
+      ? `${L('stepAction')}:\n${actions.map((a, i) => `  행동 ${i + 1}. ${a}`).join('\n')}`
+      : `${L('stepAction')}: 행동 1. ${actions[0] ?? '(없음)'}`,
     `${L('stepVisual')}: ${join(node.visual)}`,
     `${L('stepSubtitle')}: ${join(node.subtitle)}`,
   ];
@@ -46,6 +53,32 @@ export function wantSeconds(doc, p) {
   return Math.min(max, Math.max(min, Number.isFinite(s) && s > 0 ? s : 5));
 }
 
+/**
+ * 경계를 장면이 바뀌는 곳에 붙인다. 화면은 1초에 한 장씩 읽혀서 모델이 준 초는 1초쯤 어긋날 수 있고,
+ * 편집된 영상은 컷 바로 앞뒤에서 끊기면 다른 장면이 한두 프레임 끼어 어색하다.
+ * 가까운 컷(±snapSec)이 있을 때만 옮기고, 옮기면 길이가 minSec 보다 짧아지면 그 쪽은 두지 않는다.
+ */
+export function snapToCuts(start, end, cuts, { snapSec = config.media.cutSnapSec, minSec = 0, maxEnd = Infinity } = {}) {
+  if (!cuts?.length || !(snapSec > 0)) return { start, end };
+  const near = (t) => {
+    let best = null;
+    for (const c of cuts) if (Math.abs(c - t) <= snapSec && (best === null || Math.abs(c - t) < Math.abs(best - t))) best = c;
+    return best;
+  };
+  // 컷에 붙인 경계는 0.1초 단위로 **컷 안쪽으로** 맞춘다 — 반올림하다 앞 장면 한 프레임이 끼지 않게.
+  const inward = (t, up) => (up ? Math.ceil(t * 10 - 1e-6) : Math.floor(t * 10 + 1e-6)) / 10;
+  let s = start;
+  let e = end;
+  const ns = near(start);
+  if (ns !== null && e - inward(ns, true) >= minSec) s = inward(ns, true);
+  const ne = near(end);
+  if (ne !== null && ne <= maxEnd && inward(ne, false) - s >= minSec) e = inward(ne, false);
+  return { start: s, end: e };
+}
+
+const coversOf = (c) => [...new Set((Array.isArray(c?.covers) ? c.covers : [])
+  .map((n) => Math.round(Number(n))).filter((n) => Number.isFinite(n) && n >= 1))].sort((a, b) => a - b);
+
 /** 조각 하나를 그 영상 안의 올바른 구간으로 맞춘다. 못 쓰면 null. */
 export function cleanClip(c, videos, { minSec, maxSec } = {}) {
   const idx = Math.round(Number(c?.video ?? 1)) - 1;
@@ -60,13 +93,21 @@ export function cleanClip(c, videos, { minSec, maxSec } = {}) {
   if (start + len > video.durationSec) start = Math.max(0, video.durationSec - len);
   len = Math.min(len, video.durationSec - start);
   if (len < 0.4) return null;
+  const snapped = snapToCuts(start, start + len, video.cuts, {
+    minSec: Math.min(minSec, len), maxEnd: video.durationSec,
+  });
+  // 붙인 뒤에도 최대 길이는 지킨다(뒤쪽 컷으로 늘어날 수 있다)
+  const s = snapped.start;
+  const e = Math.min(snapped.end, s + maxSec);
+  const covers = coversOf(c);
   return {
     videoId: video.id,
     video: idx + 1,
     videoName: video.name,
-    start: Math.round(start * 10) / 10,
-    end: Math.round((start + len) * 10) / 10,
+    start: Math.round(s * 10) / 10,
+    end: Math.round(e * 10) / 10,
     why: String(c?.why ?? '').trim().slice(0, 200),
+    ...(covers.length ? { covers } : {}),
   };
 }
 
@@ -127,7 +168,13 @@ export async function matchClip({ videoIds, doc, path: p, jobDir, signal, onProg
     const frames = readFrames(id);
     if (!frames?.length) throw new Error('이 영상은 아직 준비되지 않았습니다.');
     return {
-      id, n: i + 1, name: rec.name, durationSec: rec.usedSec || rec.durationSec, frames, speech: readSpeech(id) ?? [],
+      id,
+      n: i + 1,
+      name: rec.name,
+      durationSec: rec.usedSec || rec.durationSec,
+      frames,
+      speech: readSpeech(id) ?? [],
+      cuts: readCuts(id) ?? [],
     };
   });
   if (!videos.length) throw new Error('영상을 찾지 못했습니다.');
@@ -164,5 +211,20 @@ export async function matchClip({ videoIds, doc, path: p, jobDir, signal, onProg
   const singles = cleanCandidates(value.singles, { videos, minSec, maxSec });
   const sequence = cleanSequence(value.sequence, { videos, partMinSec, partMaxSec, totalMaxSec: seqMaxSec });
   if (!singles.length && !sequence) throw new Error('쓸 만한 구간을 찾지 못했습니다. 시작·끝 초를 직접 넣어 주세요.');
-  return { singles, sequence, usage: result.usage ?? null };
+  return {
+    singles, sequence, videoNotes: cleanVideoNotes(value.videos, videos), usage: result.usage ?? null,
+  };
+}
+
+/** 영상마다 이 스텝에 무엇이 있는지 한 줄 — 안 쓴 영상이 왜 빠졌는지 화면에 보여 준다. 영상이 하나면 없다. */
+export function cleanVideoNotes(list, videos) {
+  if (videos.length < 2) return [];
+  const out = [];
+  for (const n of list ?? []) {
+    const v = videos[Math.round(Number(n?.video)) - 1];
+    const why = String(n?.why ?? '').trim().slice(0, 200);
+    if (!v || !why || out.some((o) => o.videoId === v.id)) continue;
+    out.push({ videoId: v.id, video: v.n, videoName: v.name, why });
+  }
+  return out.sort((a, b) => a.video - b.video);
 }

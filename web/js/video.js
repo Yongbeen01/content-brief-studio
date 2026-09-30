@@ -1,5 +1,6 @@
 import { api, pollJob, sessionToken } from './api.js';
 import { getAt, imageSlots, setAt } from './doc.js';
+import { checkLabel, passes, topPick } from './clip-rank.js';
 
 /**
  * 스텝의 회색 상자 **안에서** 영상 → 참고 GIF 를 만든다.
@@ -27,7 +28,15 @@ const PHASE_LABEL = {
 };
 
 /** 작업 단계 → 진행 막대(%) */
-const PCT = { tools: 8, probe: 14, sheets: 22, speech: 34, describe: 55, match: 45, preview: 82, gif: 60 };
+const PCT = { tools: 8, probe: 14, sheets: 22, speech: 34, describe: 55, match: 45, preview: 72, verify: 88, gif: 60 };
+
+/** 카드·상자에 붙는 「확신 N% · 화면 확인 통과」. 순서 규칙은 clip-rank.js(서버와 같다). */
+function scoreText(c) {
+  return [
+    c?.confidence != null ? `확신 ${Math.round(c.confidence * 100)}%` : '',
+    checkLabel(c),
+  ].filter(Boolean).join(' · ');
+}
 
 function el(tag, attrs = {}, ...kids) {
   const e = document.createElement(tag);
@@ -116,18 +125,21 @@ export function createVideoPanel({ root, getDoc, getDraftId, commit, toast, onRe
 
   function foundPanel(job) {
     const seq = job.sequence;
-    const best = Math.max(seq?.confidence ?? 0, job.singles?.[0]?.confidence ?? 0);
+    const top = topPick(job);
     const what = seq
       ? `${seq.parts.length}조각을 이어 붙인 것까지 ${(job.singles?.length ?? 0) + 1}개`
       : `${job.singles?.length ?? 0}개`;
+    // 영상이 여럿이면 맨 위 후보가 그중 몇 개를 쓰는지 — "왜 하나만?" 을 상자에서 바로 알 수 있게
+    const used = new Set((top?.parts ?? []).map((p) => p.videoId));
+    const usage = job.videos.length > 1 ? `영상 ${job.videos.length}개 중 ${used.size}개 사용` : job.videos[0]?.name;
     return el('div', { class: 'vp', dataset: { vidPanel: '1' } },
       el('div', { class: 'vp-head' }, `맞는 구간 ${what}`),
       el('button', {
         type: 'button', class: 'vp-btn primary', dataset: { vid: '1' }, on: { click: () => openClip(job.nodeId) },
       }, '구간 고르기'),
       el('div', { class: 'vp-note' }, [
-        job.videos.map((v) => v.name).join(', '),
-        best ? `확신 ${Math.round(best * 100)}%` : '',
+        usage,
+        scoreText(top?.cand),
       ].filter(Boolean).join(' · ')),
       el('button', { type: 'button', class: 'vp-link', dataset: { vid: '1' }, on: { click: () => reset(job.nodeId) } }, '다른 영상으로'));
   }
@@ -178,20 +190,52 @@ export function createVideoPanel({ root, getDoc, getDraftId, commit, toast, onRe
 
   // ── 구간 고르기 창 ────────────────────────────────────────────────────────
 
-  function clipCard(job, { preview, seconds, why, confidence, label, parts, seq = false }) {
+  /** 조각이 맡은 행동 — 「행동 2 코튼 패드에 소프트너를…」 처럼 스텝 글 앞부분을 붙여 보여 준다. */
+  function coversText(step, covers) {
+    if (!covers?.length) return '';
+    const actions = (step?.action ?? []).map((a) => String(a).replace(/\*\*/g, '').replace(/\s+/g, ' ').trim());
+    const short = (s) => (s.length > 16 ? `${s.slice(0, 16)}…` : s);
+    if (covers.length > 1) return `행동 ${covers.join('·')}`;
+    const a = actions[covers[0] - 1];
+    return a ? `행동 ${covers[0]} ${short(a)}` : `행동 ${covers[0]}`;
+  }
+
+  function clipCard(job, step, {
+    preview, seconds, why, cand, seen, label, parts, covers, dropped = [], seq = false,
+  }) {
     const many = job.videos.length > 1;
-    const where = seq
-      ? parts.map((p, i) => `${i + 1}) ${many ? `${p.videoName} ` : ''}${p.start}–${p.end}초`).join(' · ')
-      : '';
+    const name = (p) => {
+      const v = job.videos.findIndex((x) => x.id === p.videoId);
+      return many ? `영상${v + 1} ` : '';
+    };
+    const partLines = seq
+      ? parts.map((p, i) => el('span', { class: `clip-parts${p.ok === false ? ' bad' : ''}` },
+        `${i + 1}) ${name(p)}${p.start}–${p.end}초${p.covers?.length ? ` · ${coversText(step, p.covers)}` : ''}${p.ok === false ? ' — 화면 확인에서 안 맞음' : ''}`))
+      : (covers?.length ? [el('span', { class: 'clip-parts' }, coversText(step, covers))] : []);
+    // 실제 장면 확인에서 안 맞아 뺀 조각 — 미리보기·GIF 에는 이미 빠져 있다
+    const droppedLines = dropped.map((p) => el('span', { class: 'clip-parts bad' },
+      `뺀 조각: ${name(p)}${p.start}–${p.end}초${p.covers?.length ? ` · ${coversText(step, p.covers)}` : ''} — 실제 장면에서 안 보여 뺐습니다`));
     return el('button', {
-      type: 'button', class: `clip-cand ${seq ? 'clip-seq' : ''}`.trim(), on: { click: () => makeGif(job.nodeId, parts) },
+      type: 'button', class: ['clip-cand', seq ? 'clip-seq' : '', passes(cand) ? '' : 'weak'].filter(Boolean).join(' '), on: { click: () => makeGif(job.nodeId, parts) },
     },
     el('video', { src: preview, autoplay: true, muted: true, loop: true, playsinline: true }),
     el('div', { class: 'clip-body' },
-      el('b', {}, `${label} · ${seconds}초${confidence != null ? ` · 확신 ${Math.round(confidence * 100)}%` : ''}`),
+      el('b', {}, [`${label} · ${seconds}초`, scoreText(cand)].filter(Boolean).join(' · ')),
       el('span', {}, why),
-      where ? el('span', { class: 'clip-parts' }, where) : null,
+      seen ? el('span', { class: 'clip-seen' }, `${dropped.length ? '빼기 전 실제 장면' : '실제 장면'}: ${seen}`) : null,
+      ...partLines,
+      ...droppedLines,
       el('div', { class: 'vp-btn primary' }, '이 구간으로')));
+  }
+
+  /** 영상이 여럿일 때 — 영상마다 이 스텝에 무엇이 있는지, 맨 위 후보가 안 쓴 영상은 왜 빠졌는지. */
+  function videoNotesList(job) {
+    if (job.videos.length < 2) return null;
+    const used = new Set((topPick(job)?.parts ?? []).map((p) => p.videoId));
+    const notes = new Map((job.videoNotes ?? []).map((n) => [n.videoId, n.why]));
+    return el('ul', { class: 'clip-videos' }, job.videos.map((v, i) => el('li', { class: used.has(v.id) ? '' : 'unused' },
+      el('b', {}, `영상${i + 1}${used.has(v.id) ? '' : ' (맨 위 후보에 안 씀)'}`),
+      ` ${v.name}${notes.get(v.id) ? ` — ${notes.get(v.id)}` : ''}`)));
   }
 
   function openClip(nodeId) {
@@ -199,35 +243,53 @@ export function createVideoPanel({ root, getDoc, getDraftId, commit, toast, onRe
     if (!job) return;
     const dlg = document.getElementById('clip_dialog');
     const step = getAt(getDoc(), (job.path ?? []).slice(0, -1));
-    document.getElementById('clip_where').textContent = [
+    const top = topPick(job);
+    const where = document.getElementById('clip_where');
+    where.textContent = [
       step?.title ? `「${step.title}」 자리` : '이 자리',
-      `${job.videos.map((v) => v.name).join(', ')} 에서 찾은 구간입니다.`,
-      job.sequence ? '맨 위는 여러 장면을 순서대로 이어 붙인 것입니다.' : '',
-    ].filter(Boolean).join(' — '),
+      job.videos.length > 1 ? `영상 ${job.videos.length}개에서 찾은 구간입니다.` : `${job.videos[0]?.name} 에서 찾은 구간입니다.`,
+      top?.seq ? '맨 위는 여러 장면을 순서대로 이어 붙인 것입니다.' : '',
+      job.verified ? '「화면 확인」은 고른 장면을 실제 화면으로 다시 본 결과입니다 — 미흡한 후보는 아래로 내렸습니다.' : '',
+    ].filter(Boolean).join(' — ');
+    if (where.nextElementSibling?.classList.contains('clip-videos')) where.nextElementSibling.remove();
+    const notes = videoNotesList(job);
+    if (notes) where.after(notes);
+
+    const seqCard = job.sequence ? clipCard(job, step, {
+      preview: job.sequence.preview,
+      seconds: job.sequence.seconds,
+      why: job.sequence.why,
+      cand: job.sequence,
+      seen: job.sequence.check?.seen,
+      label: `이어 붙이기 ${job.sequence.parts.length}조각`,
+      parts: job.sequence.parts,
+      dropped: job.sequence.dropped ?? [],
+      seq: true,
+    }) : null;
+    const singleCards = (job.singles ?? []).map((c) => clipCard(job, step, {
+      preview: c.preview,
+      seconds: Math.round((c.end - c.start) * 10) / 10,
+      why: c.why,
+      cand: c,
+      seen: c.check?.seen,
+      covers: c.covers,
+      label: job.videos.length > 1
+        ? `영상${job.videos.findIndex((v) => v.id === c.videoId) + 1} ${c.start}–${c.end}초`
+        : `${c.start}–${c.end}초`,
+      parts: [c],
+    }));
+    // 이어 붙인 것은 한 구간짜리 1등보다 점수가 낮으면 아래로 내린다(실제 장면 확인에서 떨어졌을 때)
     document.getElementById('clip_grid').replaceChildren(
-      ...(job.sequence ? [clipCard(job, {
-        preview: job.sequence.preview,
-        seconds: job.sequence.seconds,
-        why: job.sequence.why,
-        confidence: job.sequence.confidence,
-        label: `이어 붙이기 ${job.sequence.parts.length}조각`,
-        parts: job.sequence.parts,
-        seq: true,
-      })] : []),
-      ...(job.singles ?? []).map((c) => clipCard(job, {
-        preview: c.preview,
-        seconds: Math.round((c.end - c.start) * 10) / 10,
-        why: c.why,
-        confidence: c.confidence,
-        label: job.videos.length > 1 ? `${c.videoName} ${c.start}–${c.end}초` : `${c.start}–${c.end}초`,
-        parts: [c],
-      })),
+      ...(seqCard && top?.seq ? [seqCard] : []),
+      ...singleCards,
+      ...(seqCard && !top?.seq ? [seqCard] : []),
     );
     const first = job.singles?.[0] ?? job.sequence?.parts?.[0];
     const from = el('input', { type: 'number', min: '0', step: '0.5', value: String(first?.start ?? 0) });
     const to = el('input', { type: 'number', min: '0', step: '0.5', value: String(first?.end ?? 5) });
+    // 처음 채워 두는 초가 어느 영상 것인지 칸도 맞춘다(예전엔 늘 1번 영상이 골라져 있어 초와 영상이 어긋났다)
     const which = job.videos.length > 1
-      ? el('select', {}, job.videos.map((v, i) => el('option', { value: v.id }, `${i + 1}. ${v.name}`)))
+      ? el('select', {}, job.videos.map((v, i) => el('option', { value: v.id, selected: v.id === first?.videoId }, `${i + 1}. ${v.name}`)))
       : null;
     document.getElementById('clip_manual').replaceChildren(
       el('label', {}, '직접 구간 지정'), which, from, el('span', {}, '~'), to,
@@ -390,7 +452,7 @@ export function createVideoPanel({ root, getDoc, getDraftId, commit, toast, onRe
     try {
       await work(nodeId);
     } catch (e) {
-      if (jobs.has(nodeId)) update(nodeId, { phase: 'error', error: e.message, jobId: null });
+      if (jobs.has(nodeId)) update(nodeId, { phase: 'error', error: e.message });
       if (e.cancelled) { jobs.delete(nodeId); menus.add(nodeId); }
     } finally {
       running = null;
@@ -399,27 +461,50 @@ export function createVideoPanel({ root, getDoc, getDraftId, commit, toast, onRe
     }
   }
 
-  async function runJob(nodeId, startCall, base = {}) {
+  const pctOf = (j) => Math.min(0.97, ((PCT[j.phase] ?? 10) + (j.total ? (15 * j.done) / j.total : 0)) / 100);
+
+  /**
+   * 서버 작업 하나를 끝까지 기다린다. 도는 작업 id 는 상자의 jobIds 에 두어 [취소]가 전부 멈출 수 있게 한다
+   * (영상 여러 개는 준비를 동시에 돌린다). onTick 을 주면 진행 표시는 부른 쪽이 한다.
+   */
+  async function runJob(nodeId, startCall, { detail = '', onTick } = {}) {
     const { jobId } = await startCall();
-    update(nodeId, { jobId });
-    const done = await pollJob(jobId, (j) => update(nodeId, {
-      pct: Math.min(0.97, ((PCT[j.phase] ?? 10) + (j.total ? (15 * j.done) / j.total : 0)) / 100),
-      detail: [base.detail, j.detail].filter(Boolean).join(' · '),
-    }));
-    update(nodeId, { jobId: null });
+    const mine = jobs.get(nodeId);
+    if (mine) (mine.jobIds ??= new Set()).add(jobId);
+    const done = await pollJob(jobId, onTick ?? ((j) => update(nodeId, {
+      pct: pctOf(j),
+      detail: [detail, j.detail].filter(Boolean).join(' · '),
+    })));
+    mine?.jobIds?.delete(jobId);
     if (done.status === 'cancelled') throw Object.assign(new Error('멈췄습니다.'), { cancelled: true });
     if (done.status !== 'done') throw new Error(done.error?.message ?? '실패했습니다.');
     return done.result;
   }
 
+  /**
+   * 영상 준비 — 영상마다 한 번, 여러 개면 **동시에**(차례로 하면 짧은 영상 몫만큼 기다림이 그대로 더해진다).
+   * 이미 준비된 영상(같은 파일을 다른 스텝에 또 올린 경우)은 서버가 바로 돌려준다.
+   */
+  async function prepareAll(nodeId, videos) {
+    const n = videos.length;
+    const state = videos.map(() => ({ pct: 0, detail: '', done: false }));
+    const show = () => {
+      const finished = state.filter((s) => s.done).length;
+      const live = state.find((s) => !s.done && s.detail)?.detail ?? '';
+      update(nodeId, {
+        pct: Math.max(0.05, state.reduce((a, s) => a + s.pct, 0) / n),
+        detail: n > 1 ? [`영상 ${n}개 준비 중 (${finished}/${n} 끝)`, live].filter(Boolean).join(' · ') : live,
+      });
+    };
+    await Promise.all(videos.map((v, i) => runJob(nodeId, () => api('POST', `/api/videos/${v.id}/prepare`), {
+      onTick: (j) => { state[i].pct = pctOf(j); state[i].detail = j.detail ?? ''; show(); },
+    }).then(() => { Object.assign(state[i], { done: true, pct: PCT.describe / 100 }); show(); })));
+  }
+
   async function work(nodeId) {
     const job = jobs.get(nodeId);
     update(nodeId, { phase: 'working', pct: 0.05, detail: '영상 준비 중' });
-    // 준비는 영상당 한 번. 이미 준비된 영상(같은 파일을 다른 스텝에 또 올린 경우)은 서버가 바로 돌려준다.
-    for (const [i, v] of job.videos.entries()) {
-      const many = job.videos.length > 1 ? `영상 ${i + 1}/${job.videos.length}` : '';
-      await runJob(nodeId, () => api('POST', `/api/videos/${v.id}/prepare`), { detail: many });
-    }
+    await prepareAll(nodeId, job.videos);
     const doc = getDoc();
     const path = pathOf(doc, nodeId);
     if (!path) throw new Error('이 사진 자리가 문서에서 사라졌습니다.');
@@ -428,7 +513,12 @@ export function createVideoPanel({ root, getDoc, getDraftId, commit, toast, onRe
       videoIds: job.videos.map((v) => v.id), doc, path,
     }));
     update(nodeId, {
-      phase: 'found', singles: found.singles ?? [], sequence: found.sequence ?? null, detail: '',
+      phase: 'found',
+      singles: found.singles ?? [],
+      sequence: found.sequence ?? null,
+      videoNotes: found.videoNotes ?? [],
+      verified: !!found.verified,
+      detail: '',
     });
   }
 
@@ -477,7 +567,7 @@ export function createVideoPanel({ root, getDoc, getDraftId, commit, toast, onRe
     const at = queue.indexOf(nodeId);
     if (at >= 0) queue.splice(at, 1);
     for (const xhr of job.xhrs ?? []) xhr.abort();
-    if (job.jobId) await api('POST', `/api/jobs/${job.jobId}/cancel`).catch(() => {});
+    await Promise.all([...(job.jobIds ?? [])].map((id) => api('POST', `/api/jobs/${id}/cancel`).catch(() => {})));
     if (job.phase !== 'working' && job.phase !== 'gif') {
       jobs.delete(nodeId);
       menus.add(nodeId);

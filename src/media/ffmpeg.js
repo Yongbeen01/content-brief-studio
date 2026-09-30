@@ -155,6 +155,49 @@ export async function stitch(parts, dest, { workDir, fps = 15, maxWidth = 720, .
   return { file: dest, width: W, height: H };
 }
 
+/** `metadata=print` 출력에서 장면이 바뀐 시각(초)만 꺼낸다. */
+export function parseSceneCuts(text) {
+  const out = [];
+  for (const m of String(text ?? '').matchAll(/pts_time:([\d.]+)/g)) {
+    const t = Math.round(Number(m[1]) * 100) / 100;
+    if (Number.isFinite(t) && t > 0 && !out.includes(t)) out.push(t);
+  }
+  return out.sort((a, b) => a - b);
+}
+
+/**
+ * 장면이 바뀌는 시각들 — 조각 경계를 여기에 붙인다(편집된 영상은 컷 중간에서 끊기면 어색하다).
+ * 작게 줄여서 보므로 2분 영상도 1~2초면 끝난다. 결과는 stdout 으로 받는다(stderr 는 끝부분만 남긴다).
+ */
+export async function sceneCuts(src, { threshold = config.media.sceneThreshold, ...opts } = {}) {
+  const { ffmpeg } = await tools(opts);
+  const { out } = await run(ffmpeg, [
+    '-hide_banner', '-nostats', '-v', 'error', '-i', src, '-an',
+    '-vf', `scale=160:-2,select='gt(scene,${threshold})',metadata=print:file=-`, '-f', 'null', '-',
+  ], opts);
+  return parseSceneCuts(out);
+}
+
+/**
+ * 후보 미리보기 → 1초에 한 장씩 격자 한 장. 고른 조각을 모델이 **실제 장면으로** 확인할 때 쓴다.
+ * 후보는 길어야 12초라 한 장(12칸)에 다 들어간다.
+ */
+export async function clipSheet(src, dest, { grid, ...opts }) {
+  const { ffmpeg } = await tools(opts);
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  await run(ffmpeg, [
+    '-y', '-i', src, '-an', '-vf',
+    [
+      'fps=1',
+      `scale=${grid.cellW}:${grid.cellH}:force_original_aspect_ratio=decrease`,
+      `pad=${grid.cellW}:${grid.cellH}:(ow-iw)/2:(oh-ih)/2:color=0x101010`,
+      `tile=${grid.cols}x${grid.rows}`,
+    ].join(','),
+    '-frames:v', '1', '-q:v', '3', dest,
+  ], opts);
+  return dest;
+}
+
 /** 16kHz 모노 wav — 받아쓰기(whisper.cpp)가 받는 유일한 모양이다. */
 export async function toWav(src, dest, opts = {}) {
   const { ffmpeg } = await tools(opts);
