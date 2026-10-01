@@ -1,18 +1,21 @@
 import { inline } from './inline.js';
 import { CHROME, chromeText } from '../../web/js/chrome.js';
-import { STEP_LABELS, numberTemplate, parseStepHeading, uid, wordTableNumber } from '../../web/js/doc.js';
+import {
+  STEP_LABELS, childLists, numberTemplate, parseStepHeading, uid, wordTableNumber,
+} from '../../web/js/doc.js';
 import { translateFromCache } from '../../web/js/translatable.js';
 import { escapeMd } from '../sources/notion-blocks.js';
 
 /**
  * 기존 브리프(노션 페이지·노션에서 내보낸 PDF) → 우리 문서 트리. Claude 없이 코드가 옮긴다.
  *
- * 목표는 **글자 그대로**다. 새로 만드는 초안과 달리 고치거나 다시 쓰지 않는다.
+ * 목표는 **글자 그대로, 놓인 자리 그대로**다. 새로 만드는 초안과 달리 고치거나 다시 쓰지 않는다.
  * - 우리 모양으로 알아볼 수 있는 곳은 그 모양으로 옮긴다 — 그래야 미리보기에서 칸별로 고칠 수 있다.
  *   스텝(「Step N …」 제목 + 2열: 참고 GIF | ⏱·Action·Visual·Subtitle·Narration), Dos/Don'ts 색 박스(2열 항목 + 줄마다 사진),
  *   가이드 한눈에 보기 표(Hashtags·Account Tag·Caption… 두 칸 표), 🔴 금지 표현 표.
- *   원본의 소제목·항목 이름이 우리 문구와 다르면 그 글자를 labels 에 남긴다(❤️ Action, Mandatory Caption …).
- * - 알아보지 못한 곳은 일반 블록(문단·제목·목록·박스·표·사진·임베드)으로 그대로 옮긴다. 억지로 끼워 맞추지 않는다.
+ *   원본의 소제목·항목 이름이 우리 문구와 다르면 그 글자를 labels 에 남긴다(❤️ Action, Mandatory Caption …) — 색·굵기째.
+ * - 알아보지 못한 곳은 일반 블록(문단·제목·목록·박스·칸 나누기·표·사진·임베드)으로 그대로 옮긴다. 억지로 끼워 맞추지 않는다.
+ *   칸 나누기는 칸 그대로(사진 왼쪽·글 오른쪽), 들여쓴 목록은 들여쓰기째, 줄여 둔 사진은 그 크기로.
  * - 원본에 사진이 없던 자리는 optional — 비워 두면 노션에 회색 이미지를 만들지 않는다.
  *
  * 입력은 src/sources/notion-blocks.js 의 간단한 블록 나무(PDF 는 import-pdf.js 가 같은 나무를 만든다).
@@ -128,7 +131,11 @@ function readStep(list, i, ctx) {
         cur = key;
         sections[key] = [];
         const shown = plain(b.text);
-        if (shown !== chromeText(STEP_LABELS[key], ctx.lang)) labels[STEP_LABELS[key]] = shown;
+        // 원본 서식(「💬 Mandatory Subtitle」 의 빨간 글자, 줄 전체 색)이 있으면 서식째 남긴다 — 미리보기·노션이 그대로 그린다.
+        let md = String(b.text ?? '').trim();
+        if (b.color && b.color !== 'default') md = `<span color="${b.color}">${md}</span>`;
+        const styled = md !== escapeMd(shown);
+        if (styled || shown !== chromeText(STEP_LABELS[key], ctx.lang)) labels[STEP_LABELS[key]] = styled ? md : shown;
         continue;
       }
       cur = 'extra';
@@ -180,7 +187,7 @@ function readItem(col) {
 }
 
 function readGridCallout(b, ctx) {
-  const kids = [...(plain(b.text) ? [{ t: 'p', text: b.text }] : []), ...(b.children ?? [])];
+  const kids = [...(plain(b.text) ? [{ t: 'p', text: b.text, color: b.textColor }] : []), ...(b.children ?? [])];
   const at = kids.findIndex((k) => (k.t === 'h' || k.t === 'p') && plain(k.text));
   if (at < 0) return null;
   const head = kids[at];
@@ -286,7 +293,7 @@ function finishWordTables(doc, lang) {
   const n = wordTableNumber(doc);
   const walk = (nodes) => {
     for (const node of nodes ?? []) {
-      if (node.type === 'callout') walk(node.children);
+      for (const [, list] of childLists(node)) walk(list);
       if (node.type !== 'wordTable' || node._title === undefined) continue;
       const tmpl = numberTemplate(node._title, n);
       if (tmpl !== CHROME.wordTableTitle[lang]) node.labels = { ...(node.labels ?? {}), wordTableTitle: tmpl };
@@ -348,10 +355,32 @@ const colorOf = (c) => (c && c !== 'default' ? { color: c } : {});
 
 function imageNode(b, ctx) {
   const node = {
-    type: 'image', id: uid(), slot: 'photo', label: '사진', ratio: b.ratio || 1.5, ...(b.src ? {} : { optional: true }),
+    type: 'image',
+    id: uid(),
+    slot: 'photo',
+    label: '사진',
+    ratio: b.ratio || 1.5,
+    ...(b.src ? {} : { optional: true }),
+    // 노션에서 줄여 둔 크기(미리보기만 따른다)
+    ...(Number(b.width) > 0 ? { width: Number(b.width) } : {}),
+    ...(b.align ? { align: b.align } : {}),
   };
   if (b.src) ctx.pending.push({ nodeId: node.id, src: b.src });
   return node;
+}
+
+/**
+ * 노션의 칸 나누기 → 칸 블록. 사진 왼쪽·글 오른쪽 같은 배치를 그대로 살린다(예전에는 펴서 위아래로 늘어놓았다).
+ * 글이 남는 칸이 하나뿐이면 칸을 나눌 까닭이 없어 편다. 칸 너비 비율도 노션 값 그대로.
+ */
+function readColumns(b, ctx) {
+  const cols = (b.columns ?? []).map((col, c) => ({ nodes: convertList(col ?? [], ctx), ratio: b.ratios?.[c] }))
+    .filter((col) => col.nodes.length);
+  if (cols.length < 2) return cols.flatMap((col) => col.nodes);
+  const ratios = cols.map((col) => Number(col.ratio) || 0);
+  return [{
+    type: 'columns', id: uid(), columns: cols.map((col) => col.nodes), ...(ratios.every((r) => r > 0) ? { ratios } : {}),
+  }];
 }
 
 function convertOne(b, ctx) {
@@ -363,7 +392,8 @@ function convertOne(b, ctx) {
     case 'toggle':
       return [...(plain(b.text) ? [{ type: 'paragraph', id: uid(), text: b.text }] : []), ...kids()];
     case 'callout': {
-      const children = [...(plain(b.text) ? [{ type: 'paragraph', id: uid(), text: b.text }] : []), ...kids()];
+      // 박스 제목 줄의 글자색(textColor)은 그 문단의 색으로
+      const children = [...(plain(b.text) ? [{ type: 'paragraph', id: uid(), text: b.text, ...colorOf(b.textColor) }] : []), ...kids()];
       return children.length ? [{ type: 'callout', id: uid(), icon: b.icon ?? '', color: b.color || 'gray_background', children }] : [];
     }
     case 'divider': return [{ type: 'divider', id: uid() }];
@@ -378,30 +408,43 @@ function convertOne(b, ctx) {
       const width = Math.max(1, ...b.rows.map((r) => r.length));
       return [{ type: 'table', id: uid(), header: !!b.header, rows: b.rows.map((r) => Array.from({ length: width }, (_, k) => r[k] ?? '')) }];
     }
-    case 'columns': return convertList(b.columns.flat(), ctx);
+    case 'columns': return readColumns(b, ctx);
     case 'code': return plain(b.text) ? [{ type: 'paragraph', id: uid(), text: escapeMd(b.text) }] : [];
     case 'page': return [{ type: 'paragraph', id: uid(), text: `📄 [${escapeMd(b.title || '페이지')}](https://www.notion.so/${b.id})` }];
     default: return [];
   }
 }
 
-/** 목록 블록이 이어지면 한 목록으로 묶는다. 들여쓴 하위 항목은 같은 목록의 항목으로 편다. */
+/**
+ * 목록 블록이 이어지면 한 목록으로 묶는다. 들여쓴 하위 항목은 같은 목록의 항목으로 넣되 들여쓰기 깊이(levels)를 남긴다 —
+ * 미리보기·노션이 노션 원본처럼 안쪽 목록으로 그린다.
+ */
 function readList(list, i, ctx) {
   const numbered = list[i].t === 'ol';
   const same = (b) => (numbered ? b.t === 'ol' : b.t === 'ul' || b.t === 'todo');
   const items = [];
+  const levels = [];
   const after = [];
   let j = i;
-  const addItem = (b) => {
+  const addItem = (b, level) => {
     const mark = b.t === 'todo' ? (b.checked ? '☑ ' : '☐ ') : '';
-    if (plain(b.text)) items.push(`${mark}${String(b.text).trim()}`);
+    let next = level;
+    if (plain(b.text)) {
+      items.push(`${mark}${String(b.text).trim()}`);
+      levels.push(level);
+      next = level + 1;
+    }
     for (const c of b.children ?? []) {
-      if (['ul', 'ol', 'todo', 'p'].includes(c.t)) addItem(c);
+      if (['ul', 'ol', 'todo', 'p'].includes(c.t)) addItem(c, next);
       else after.push(...convertOne(c, ctx));
     }
   };
-  for (; j < list.length && same(list[j]); j += 1) addItem(list[j]);
-  const node = items.length ? [{ type: numbered ? 'numbered' : 'bulleted', id: uid(), items }] : [];
+  for (; j < list.length && same(list[j]); j += 1) addItem(list[j], 0);
+  const node = items.length
+    ? [{
+      type: numbered ? 'numbered' : 'bulleted', id: uid(), items, ...(levels.some((l) => l > 0) ? { levels } : {}),
+    }]
+    : [];
   return { nodes: [...node, ...after], next: j };
 }
 
@@ -466,9 +509,13 @@ function markRoles(nodes) {
         n.role = `section-${section}`;
       } else if (section === 1) section = 1.5; // 1️⃣ 다음 제목부터는 제품 사진 자리가 아니다
     }
-    if (n.type === 'image' && section === 1 && !product) {
-      Object.assign(n, { slot: 'product', label: '제품 이미지' });
-      product = true;
+    // 1️⃣ 섹션의 첫 사진 = 제품 사진(칸 나누기 안에 있어도 — 「사진 왼쪽 · 제품 설명 오른쪽」). 사진만 올리는 자리다.
+    if (section === 1 && !product && (n.type === 'image' || n.type === 'columns')) {
+      const im = n.type === 'image' ? n : n.columns.flat().find((c) => c.type === 'image');
+      if (im) {
+        Object.assign(im, { slot: 'product', label: '제품 이미지' });
+        product = true;
+      }
     }
     if (n.type === 'callout' && !n.role) {
       const icon = String(n.icon ?? '').replace(/️/g, '');

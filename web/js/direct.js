@@ -256,7 +256,9 @@ export function directInsert(doc, containerPath, index) {
       apply: (d, v) => insertAt(d, containerPath, index, [{ title: parse(TEXT, v[0]), desc: parse(TEXT, v[1]) }]),
     };
   }
-  if (owner?.type === 'callout' || containerPath.join('.') === 'nodes') {
+  // 박스 안·쪽 본문, 그리고 칸 나누기의 한 칸(…, 'columns', c — 불러온 브리프)
+  const column = containerPath[containerPath.length - 2] === 'columns' && getAt(doc, containerPath.slice(0, -2))?.type === 'columns';
+  if (owner?.type === 'callout' || column || containerPath.join('.') === 'nodes') {
     return {
       fields: [field('text', '넣을 글', 'lines', '', `${LINE_HINT} · ${MD_HINT}`)],
       apply: (d, v) => insertAt(d, containerPath, index,

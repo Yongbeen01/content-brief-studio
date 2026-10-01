@@ -35,8 +35,16 @@
 .n-h1 { font-size: 1.875em; margin-top: 1.4em; }
 .n-h2 { font-size: 1.5em; margin-top: 1.1em; }
 .n-h3 { font-size: 1.25em; margin-top: 0.6em; }
+/* 노션의 굵게는 600 — 브라우저 기본(bolder)이면 제목 안의 굵은 글씨가 900 까지 두꺼워진다 */
+.notion-doc strong { font-weight: 600; }
 .n-ul, .n-ol { padding: 2px 2px 2px 1.6em; }
 .n-ul li, .n-ol li { padding: 2px 0; white-space: pre-wrap; }
+/* 들여쓴 하위 항목(불러온 브리프) — 노션처럼 단마다 글머리 모양이 바뀐다 */
+.n-sublist { padding: 2px 0 0 1.5em; }
+ul.n-sublist { list-style-type: circle; }
+ul.n-sublist ul.n-sublist { list-style-type: square; }
+ol.n-sublist { list-style-type: lower-alpha; }
+ol.n-sublist ol.n-sublist { list-style-type: lower-roman; }
 .n-divider { border: 0; border-top: 1px solid var(--n-border); margin: 10px 0; }
 .n-doc-link, .notion-doc a { color: inherit; text-decoration: underline; text-decoration-color: rgba(55, 53, 47, 0.4); text-underline-offset: 2px; }
 .notion-doc code { background: rgba(135, 131, 120, 0.15); color: #EB5757; border-radius: 4px; padding: 0.1em 0.3em; font-size: 0.85em; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }

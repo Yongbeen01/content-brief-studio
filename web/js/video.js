@@ -1,9 +1,12 @@
 import { api, pollJob, sessionToken } from './api.js';
-import { getAt, imageSlots, setAt } from './doc.js';
+import {
+  getAt, imageSlots, setAt, slotScene,
+} from './doc.js';
 import { checkLabel, passes, topPick } from './clip-rank.js';
 
 /**
- * 스텝의 회색 상자 **안에서** 영상 → 참고 GIF 를 만든다.
+ * 스텝의 회색 상자 **안에서** 영상 → 참고 GIF 를 만든다. 불러온 브리프는 제품 사진 밖 모든 사진 자리가 이 상자다 —
+ * 그 자리는 스텝 글 대신 사진 옆·아래 글로 장면을 찾는다(doc.js slotScene, 서버 match.js 도 같다).
  *
  * 상자를 누르면 [레퍼런스 검색] · [영상으로 자동 생성] · [GIF 업로드] 가 상자 안에 뜨고,
  * 올리기·차례 기다리기·처리·GIF 만들기가 전부 그 상자 안에서 보인다.
@@ -238,11 +241,21 @@ export function createVideoPanel({ root, getDoc, getDraftId, commit, toast, onRe
       ` ${v.name}${notes.get(v.id) ? ` — ${notes.get(v.id)}` : ''}`)));
   }
 
+  /**
+   * 그 자리가 보여 줄 장면 — 스텝 자리면 그 스텝, 불러온 브리프의 다른 사진 자리면 그 사진 옆·아래 글을 행동 줄로
+   * 본다(서버 구간 고르기와 같은 기준 — doc.js slotScene). 조각 설명의 「행동 N …」 이 이 줄을 쓴다.
+   */
+  function sceneOf(path) {
+    const s = slotScene(getDoc(), path ?? []);
+    if (s?.kind === 'step') return s.step;
+    return { title: s?.title ?? '', action: s?.lines ?? [] };
+  }
+
   function openClip(nodeId) {
     const job = jobs.get(nodeId);
     if (!job) return;
     const dlg = document.getElementById('clip_dialog');
-    const step = getAt(getDoc(), (job.path ?? []).slice(0, -1));
+    const step = sceneOf(job.path);
     const top = topPick(job);
     const where = document.getElementById('clip_where');
     where.textContent = [
@@ -538,7 +551,7 @@ export function createVideoPanel({ root, getDoc, getDraftId, commit, toast, onRe
     const bad = parts.find((p) => !(Number(p.end) > Number(p.start)));
     if (bad) return toast('끝나는 초가 시작보다 커야 합니다', true);
     document.getElementById('clip_dialog')?.close();
-    const label = getAt(getDoc(), (job.path ?? []).slice(0, -1))?.title ?? '';
+    const label = String(sceneOf(job.path).title ?? '');
     update(nodeId, { phase: 'gif', pct: 0.1, detail: parts.length > 1 ? `${parts.length}조각 이어 붙이는 중` : '' });
     try {
       const r = await runJob(nodeId, () => api('POST', '/api/videos/clip', {

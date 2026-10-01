@@ -8,7 +8,7 @@ import {
 import { ENGLISH_DOC_NOTE, reviseSystem, reviseUser } from './prompts.js';
 import { describe, resolveTarget } from './edit.js';
 import {
-  STEP_LABELS, clone, docLang, getAt, gridItemText, labelText, nodeText, setAt, stepTimeline, stepTitle, syncGridImages, tableRows, withIds,
+  STEP_LABELS, childLists, clone, docLang, fixup, getAt, gridItemText, labelText, nodeText, setAt, stepTimeline, stepTitle, tableRows, withIds,
 } from '../../web/js/doc.js';
 
 /**
@@ -123,6 +123,13 @@ export function listParts(doc) {
             ...at, kind: null, label: `callout box${n.icon ? ` ${n.icon}` : ''} (${n.color})`, note: 'its contents are the indented parts below; moving or deleting it moves or deletes the whole box',
           });
           walk(n.children, [...p, 'children'], depth + 1, 'simple');
+          break;
+        case 'columns':
+          // 칸 나누기(불러온 브리프) — 칸마다 따로 그릇이다. 칸 사이로는 옮길 수 없다.
+          add({
+            ...at, kind: null, label: `side-by-side columns (${(n.columns ?? []).length})`, note: 'each column\'s contents are the indented parts below, column by column',
+          });
+          (n.columns ?? []).forEach((col, c) => walk(col, [...p, 'columns', c], depth + 1, 'simple'));
           break;
         case 'grid':
           add({
@@ -257,8 +264,7 @@ function containers(doc) {
   const walk = (arr, base) => {
     out.push({ arr, base });
     arr.forEach((n, i) => {
-      if (n?.type === 'callout' && Array.isArray(n.children)) walk(n.children, [...base, i, 'children']);
-      if (n?.type === 'step' && Array.isArray(n.extra)) walk(n.extra, [...base, i, 'extra']);
+      for (const [key, list] of childLists(n)) walk(list, [...base, i, ...key]);
       if (n?.type === 'grid' && Array.isArray(n.items)) out.push({ arr: n.items, base: [...base, i, 'items'] });
     });
   };
@@ -273,14 +279,6 @@ function home(doc, obj) {
     if (i >= 0) return { arr: c.arr, index: i, path: [...c.base, i] };
   }
   return null;
-}
-
-function syncGrids(nodes) {
-  for (const n of nodes ?? []) {
-    if (n.type === 'grid') n.images = syncGridImages(n);
-    if (n.type === 'callout') syncGrids(n.children);
-    if (n.type === 'step') syncGrids(n.extra);
-  }
 }
 
 /**
@@ -341,7 +339,7 @@ export function applyPlan(doc, plan) {
     if (at) at.arr.splice(at.index, 1); // 박스째 지운 안쪽 자리는 이미 없다
   }
 
-  syncGrids(work.nodes);
+  fixup(work); // 그리드 사진 자리 수·목록 들여쓰기 수를 다시 맞춘다
   const seen = new Set();
   const changed = [];
   for (const m of marks) {

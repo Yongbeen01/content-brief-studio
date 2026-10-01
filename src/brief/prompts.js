@@ -139,7 +139,8 @@ Slot conventions (the label in brackets tells you which one):
 Hard rules
 - Keep every number, brand name, product name, hashtag, @handle, URL and ingredient name exactly as they are.
 - Keep placeholders like {n} exactly as they are (the app fills in the number).
-- Keep the markdown markers that are in the Korean line (**bold**, [text](url)) around the same idea.
+- Keep the markdown markers that are in the Korean line (**bold**, [text](url)) and the format tags
+  (<span color="red">…</span>, <u>…</u>, <b>…</b>, <i>…</i>, <s>…</s>) around the same idea.
 - Do not add facts that are not in the Korean line. Do not merge or split lines.
 - Cosmetic-safe wording only: no treat / cure / heal / prevent / acne treatment.
 - Return exactly as many strings as you were given, in the same order, nothing else.`;
@@ -172,6 +173,8 @@ You change ONE part of an existing guide, following the user's instruction. The 
 - Keep the guide's tone & manner for that section (see the guide). Keep facts unless the instruction asks otherwise.
 - Stay consistent with the rest of the guide (step timing, selling points, product facts).
 - Text stays US English unless the target itself is Korean.
+- An imported guide may carry format tags copied from Notion (<span color="red">…</span>, <u>…</u>, <b>…</b>).
+  Keep them around the same words unless the instruction is about that formatting.
 
 ${FORMAT_RULES}`;
 }
@@ -264,7 +267,9 @@ Hard rules
   and of the guide's section rules above.
 - Never invent product facts (ingredients, percentages, certifications, results). Use the guide itself and the product facts given.
 - Cosmetic-safe wording only: no treat / cure / heal / prevent (치료·치유·개선 보증).
-- Inline formatting: only **bold**, *italic* and [text](url). No HTML, no markdown heading marks inside a value.
+- Inline formatting: **bold**, *italic*, [text](url), and the format tags copied from Notion — <span color="red">…</span>
+  (text color; "red_background" etc. is a highlight), <u>…</u>, <b>…</b>, <i>…</i>, <s>…</s>. Keep existing tags around the
+  same words; add a color tag only when the instruction asks for color. No other HTML, no markdown heading marks inside a value.
 - Photos, GIFs and embedded videos cannot be replaced or changed here (they can only be moved or deleted) — put such a
   request in skipped with "미리보기에서 그 사진 자리를 눌러 바꿔 주세요".
 - Fixed sub-headings that are not listed as parts (e.g. "⏱ Time Duration", "🩷 Action" above step fields, table item
@@ -377,7 +382,9 @@ Markup (use exactly this):
 - Inline: **bold**, *italic*, ~~strikethrough~~, \`code\`, [text](url).
   Links are invisible in a PDF, so you get the list of the PDF's links in page order: put each one on the words it
   belongs to (e.g. a Google Form link on "submit your video URL here"). Never invent a URL.
-- A whole line in colored text (e.g. red): add " {color=red}" at the end of that heading or paragraph line.`;
+- A whole line in colored text (e.g. red): add " {color=red}" at the end of that heading or paragraph line.
+- Only some words of a line in color: wrap just those words in <span color="red">…</span> (same color names; a
+  highlighted background is "red_background" etc.). Underlined words: <u>…</u>. Use no other HTML.`;
 }
 
 export function importPdfUser({ pdfPath, links = [], images = [] }) {

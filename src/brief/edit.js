@@ -25,6 +25,8 @@ function nodeLabel(doc, node) {
     case 'paragraph': return `「${String(node.text).slice(0, 60)}」`;
     case 'step': return stepTitle(node, stepTimeline(doc).steps.get(node.id));
     case 'callout': return `${node.icon || ''} 박스 (${node.role ?? node.color})`;
+    case 'columns': return `칸 나누기(${(node.columns ?? []).length}칸)`;
+    case 'image': return node.slot === 'product' ? '제품 사진' : '사진';
     case 'table': return node.role === 'overview' ? 'Guideline Overview 표' : '표';
     case 'grid': return node.kind === 'dont' ? "Don'ts 항목들" : "Do's 항목들";
     case 'wordTable': return wordTableTitle(doc, 'ko', node);
@@ -48,6 +50,7 @@ export function describe(doc, p) {
   for (let i = 0; i < p.length; i += 1) {
     cur = cur?.[p[i]];
     if (cur && typeof cur === 'object' && !Array.isArray(cur) && cur.type) parts.push(nodeLabel(doc, cur));
+    if (p[i - 1] === 'columns' && typeof p[i] === 'number') parts.push(`${p[i] + 1}번째 칸`);
   }
   const last = p[p.length - 1];
   if (STEP_FIELD_LABEL[last]) parts.push(STEP_FIELD_LABEL[last]);
@@ -148,10 +151,16 @@ export function resolveTarget(doc, p) {
       throw new Error('링크는 [직접 고치기]로 고쳐 주세요.');
     case 'divider':
       throw new Error('구분선은 고칠 내용이 없습니다. 지우려면 [삭제]를 누르세요.');
+    case 'columns':
+      throw new Error('칸 나누기는 칸 안의 글을 눌러 고쳐 주세요.');
     default:
       throw new Error('이 부분은 프롬프트로 고칠 수 없습니다.');
   }
 }
+
+/** 칸 나누기의 한 칸(…, 'columns', c)인가 — 칸 안에는 박스 안처럼 글 블록을 넣는다. */
+const isColumn = (doc, containerPath) => containerPath[containerPath.length - 2] === 'columns'
+  && getAt(doc, containerPath.slice(0, -2))?.type === 'columns';
 
 const ALLOWED = {
   top: 'paragraph, heading(level 1-3), bulleted, numbered, divider, table, callout (icon emoji + *_background color + simple children), step (a new scene: title without "Step N:", seconds, action, visual, subtitle, narration; hook false)',
@@ -164,7 +173,7 @@ export function resolveInsert(doc, containerPath, index) {
   if (!Array.isArray(arr)) throw new Error('추가할 자리를 찾지 못했습니다.');
   const owner = containerPath.length > 1 ? getAt(doc, containerPath.slice(0, -1)) : null;
   let kind = 'top';
-  if (owner?.type === 'callout') kind = 'callout';
+  if (owner?.type === 'callout' || isColumn(doc, containerPath)) kind = 'callout';
   else if (owner?.type === 'grid') kind = 'grid';
   else if (containerPath.join('.') !== 'nodes') throw new Error('이 자리에는 추가할 수 없습니다.');
 

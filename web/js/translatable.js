@@ -78,6 +78,9 @@ export function collectTranslatable(doc) {
         case 'callout':
           walk(n.children, [...p, 'children'], n.role ?? role);
           break;
+        case 'columns':
+          (n.columns ?? []).forEach((col, c) => walk(col, [...p, 'columns', c], role));
+          break;
         default:
           break;
       }

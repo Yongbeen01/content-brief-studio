@@ -122,8 +122,10 @@ test('불러오기: 공개 노션 페이지 → 문서 (스텝·표·Dos/Don\'ts
   assert.equal(doc.nodes.find((n) => n.type === 'image').slot, 'product');
   assert.equal(doc.nodes.find((n) => n.role === 'main-idea').children[0].text, '**Main idea sentence.**');
   assert.equal(doc.nodes[0].children[0].color, 'red'); // 한 색 글 → 블록 색
-  // 들여쓴 하위 목록은 같은 목록의 항목으로 편다
-  assert.deepEqual(doc.nodes.find((n) => n.type === 'bulleted').items, ['**Water-light serum** for glow', 'Five extracts', 'Seaweed and kelp']);
+  // 들여쓴 하위 목록은 같은 목록의 항목으로 넣고 들여쓰기 깊이를 남긴다(노션처럼 안쪽 목록으로 그린다)
+  const ul = doc.nodes.find((n) => n.type === 'bulleted');
+  assert.deepEqual(ul.items, ['**Water-light serum** for glow', 'Five extracts', 'Seaweed and kelp']);
+  assert.deepEqual(ul.levels, [0, 0, 1]);
 
   // 가이드 한눈에 보기 표 — 원본 항목 이름은 labels 에, 줄의 정체(rowChrome)는 우리 key 로
   const ov = doc.nodes.find((n) => n.role === 'overview');
@@ -143,7 +145,9 @@ test('불러오기: 공개 노션 페이지 → 문서 (스텝·표·Dos/Don\'ts
   assert.equal(stepTitle(steps[0], stepTimeline(doc).steps.get(steps[0].id), 'en'), 'Step 1 (HOOK): Drop It ⭐');
   // 모든 스텝이 같은 소제목이면 문서 전체로, 한 스텝에만 있는 것은 그 스텝에
   assert.equal(doc.labels.stepAction, '❤️ Action');
-  assert.equal(steps[0].labels.stepSubtitle, '💬 Mandatory Subtitle');
+  // 원본 서식(빨간 글자)째 남긴다 — 이모지는 검정, 글자만 빨강
+  assert.equal(steps[0].labels.stepSubtitle, '💬 <span color="red">Mandatory Subtitle</span>');
+  assert.equal(inline.plain(labelText(doc, steps[0], 'stepSubtitle', 'en')), '💬 Mandatory Subtitle');
   assert.equal(steps[1].labels, undefined);
   assert.equal(labelText(doc, steps[1], 'stepAction', 'en'), '❤️ Action');
   assert.equal(labelText(doc, steps[1], 'stepVisual', 'en'), '👁 Visual');
@@ -186,7 +190,11 @@ test('불러온 문서 → 노션 블록: 비워 둔 자리는 안 올리고, �
   assert.ok(flat.some((b) => b.type === 'embed' && b.embed.url === 'https://www.tiktok.com/@x/video/1'));
   const plainOf = (b) => (b[b.type]?.rich_text ?? []).map((r) => r.text.content).join('');
   assert.ok(flat.some((b) => b.type === 'heading_3' && plainOf(b) === '❤️ Action'));
-  assert.ok(flat.some((b) => b.type === 'heading_3' && plainOf(b) === '💬 Mandatory Subtitle'));
+  const sub = flat.find((b) => b.type === 'heading_3' && plainOf(b) === '💬 Mandatory Subtitle');
+  assert.deepEqual(sub.heading_3.rich_text.map((r) => r.annotations.color), ['default', 'red']); // 빨간 글자는 노션에서도 빨강
+  // 들여쓴 하위 항목은 앞 항목의 자식으로
+  const five = flat.find((b) => b.type === 'bulleted_list_item' && plainOf(b) === 'Five extracts');
+  assert.deepEqual(five.bulleted_list_item.children.map(plainOf), ['Seaweed and kelp']);
   // 원본에 없던 칸(Narration)은 소제목째 안 올라간다
   assert.ok(!flat.some((b) => b.type === 'heading_3' && /Narration/.test(plainOf(b))));
   const dosKids = blocks.find((b) => b.type === 'callout' && b.callout.color === 'green_background' && b.callout.children[1]?.type === 'image').callout.children;

@@ -31,7 +31,8 @@ export function richText(text) {
         type: 'text',
         text: { content: piece, link: seg.href ? { url: seg.href } : null },
         annotations: {
-          bold: seg.bold, italic: seg.italic, strikethrough: seg.strike, underline: false, code: seg.code, color: 'default',
+          // 밑줄·부분 색은 불러온 브리프의 서식 태그(<u>, <span color>)에서 온다.
+          bold: seg.bold, italic: seg.italic, strikethrough: seg.strike, underline: !!seg.underline, code: seg.code, color: apiColor(seg.color || 'default'),
         },
       });
     }
@@ -42,8 +43,27 @@ export function richText(text) {
 const block = (type, body) => ({ object: 'block', type, [type]: body });
 const para = (text, color = 'default') => block('paragraph', { rich_text: richText(text), color: apiColor(color) });
 const head = (level, text, color = 'default') => block(`heading_${level}`, { rich_text: richText(text), color: apiColor(color), is_toggleable: false });
-const bullets = (items) => items.map((t) => block('bulleted_list_item', { rich_text: richText(t), color: 'default' }));
-const numbers = (items) => items.map((t) => block('numbered_list_item', { rich_text: richText(t), color: 'default' }));
+
+/** 목록 — 들여쓴 하위 항목(levels, 불러온 브리프)은 바로 앞 항목의 자식으로 넣는다(노션 원본과 같은 모양). */
+function listItems(type, items, levels = []) {
+  const root = [];
+  const stack = [{ level: -1, kids: root }];
+  const made = [];
+  items.forEach((t, i) => {
+    const lv = Math.max(0, Number(levels?.[i]) || 0);
+    while (stack.length > 1 && stack[stack.length - 1].level >= lv) stack.pop();
+    const kids = [];
+    const b = block(type, { rich_text: richText(t), color: 'default', children: kids });
+    stack[stack.length - 1].kids.push(b);
+    stack.push({ level: lv, kids });
+    made.push(b);
+  });
+  // 자식이 생긴 항목에만 children 을 남긴다(빈 배열은 보내지 않는다)
+  for (const b of made) if (!b[type].children.length) delete b[type].children;
+  return root;
+}
+const bullets = (items, levels) => listItems('bulleted_list_item', items, levels);
+const numbers = (items, levels) => listItems('numbered_list_item', items, levels);
 const divider = () => block('divider', {});
 const column = (children) => block('column', { children: children.length ? children : [para('')] });
 const columns = (...cols) => block('column_list', { children: cols.map(column) });
@@ -112,9 +132,15 @@ function nodeBlocks(doc, n, uploads, tl) {
   switch (n.type) {
     case 'paragraph': return [para(nodeText(n, LANG), n.color)];
     case 'heading': return [head(n.level, nodeText(n, LANG), n.color)];
-    case 'bulleted': return bullets(n.items);
-    case 'numbered': return numbers(n.items);
+    case 'bulleted': return bullets(n.items, n.levels);
+    case 'numbered': return numbers(n.items, n.levels);
     case 'divider': return [divider()];
+    case 'columns': {
+      // 칸 나누기(불러온 브리프). 비워 둔 사진만 있던 칸처럼 올릴 것이 없는 칸은 빼고, 하나만 남으면 편다.
+      // 노션 API 는 칸 너비 비율을 받지 않는다 — 노션에서는 같은 너비로 보인다.
+      const cols = (n.columns ?? []).map((col) => (col ?? []).flatMap((c) => nodeBlocks(doc, c, uploads, tl))).filter((c) => c.length);
+      return cols.length > 1 ? [columns(...cols)] : cols.flat();
+    }
     case 'image': {
       const im = image(n, uploads);
       return im ? [im] : [];

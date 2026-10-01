@@ -1,4 +1,6 @@
-import { gridItemText, imageSlots, stepTimeline } from './doc.js';
+import {
+  childLists, gridItemText, imageSlots, stepTimeline,
+} from './doc.js';
 import { accountIds, accountTag } from './account.js';
 
 /**
@@ -32,7 +34,7 @@ export function isBrandTag(tag, brand) {
 function findAll(nodes, pred, out = []) {
   for (const n of nodes ?? []) {
     if (pred(n)) out.push(n);
-    if (n.type === 'callout') findAll(n.children, pred, out);
+    if (n.type === 'callout' || n.type === 'columns') for (const [, list] of childLists(n)) findAll(list, pred, out);
   }
   return out;
 }

@@ -6,7 +6,10 @@ import { fixEscapes, validate } from '../brief/schema.js';
 import { MATCH_SCHEMA, matchSystem, matchUser } from './prompts.js';
 import { getVideo, readCuts, readFrames, readSpeech } from './store.js';
 import { chromeText } from '../../web/js/chrome.js';
-import { durationText, getAt, stepTimeline, stepTitle } from '../../web/js/doc.js';
+import {
+  durationText, slotScene, stepTimeline, stepTitle,
+} from '../../web/js/doc.js';
+import { inline } from '../brief/inline.js';
 
 /**
  * 이 스텝에 맞는 구간 고르기 — GIF 하나당 Claude 한 번(opus).
@@ -22,13 +25,29 @@ import { durationText, getAt, stepTimeline, stepTitle } from '../../web/js/doc.j
  * 이렇게 고른 것은 설명 글만 보고 고른 것이라, 서버가 미리보기를 만든 뒤 실제 장면으로 한 번 더 확인한다(verify.js).
  */
 
-/** 사진 자리 경로 → 그 스텝을 사람이 읽는 글로. 이 글이 고르기의 기준이다. */
+/**
+ * 사진 자리 경로 → 그 자리가 보여 줄 장면을 사람이 읽는 글로. 이 글이 고르기의 기준이다.
+ * 스텝의 참고 GIF 면 그 스텝. 불러온 브리프의 다른 사진 자리면 그 사진 옆·아래 글을 행동 줄로(doc.js slotScene) —
+ * 행동 번호는 스텝과 같이 붙여, 이어 붙일 조각마다 「몇 번 줄을 보여 주는지」를 받는다.
+ */
 export function stepSummary(doc, p) {
-  const node = getAt(doc, Array.isArray(p) ? p.slice(0, -1) : []);
+  const scene = slotScene(doc, Array.isArray(p) ? p : []);
+  const clean = (arr) => (arr ?? []).map((s) => String(s).replace(/\s+/g, ' ').trim()).filter(Boolean);
+  if (scene?.kind === 'text') {
+    const lines = clean(scene.lines.map((s) => inline.plain(s)));
+    if (!lines.length) return '(이 사진 자리 옆·아래에 글이 없습니다 — 영상에서 가장 또렷하게 제품이 보이는 구간)';
+    return [
+      `자리: ${inline.plain(scene.title) || '사진 자리'} (스텝이 아닌 사진 — 아래 글이 이 사진에 담을 장면이다)`,
+      `길이: 정해진 길이 없음(${config.media.clipMinSec}~${config.media.clipMaxSec}초)`,
+      lines.length > 1
+        ? `장면 글:\n${lines.map((a, i) => `  행동 ${i + 1}. ${a}`).join('\n')}`
+        : `장면 글: 행동 1. ${lines[0]}`,
+    ].join('\n');
+  }
+  const node = scene?.kind === 'step' ? scene.step : null;
   if (node?.type !== 'step') return '(스텝 정보를 찾지 못했습니다 — 영상에서 가장 또렷하게 제품이 보이는 구간)';
   const tl = stepTimeline(doc).steps.get(node.id);
   const L = (k) => chromeText(k, 'ko');
-  const clean = (arr) => (arr ?? []).map((s) => String(s).replace(/\s+/g, ' ').trim()).filter(Boolean);
   const join = (arr) => clean(arr).join(' / ');
   // 행동은 번호를 붙인다 — 이어 붙일 조각마다 「몇 번 행동을 보여 주는지」를 이 번호로 받는다.
   const actions = clean(node.action);
@@ -43,12 +62,14 @@ export function stepSummary(doc, p) {
   ];
   if (node.narration?.length) lines.push(`${L('stepNarration')}: ${join(node.narration)}`);
   if (node.image?.hint) lines.push(`참고 GIF 힌트: ${node.image.hint}`);
+  // 스텝 바로 뒤에 붙은 사진(「[Please attach this image]」)이면 그 안내 글도 같이
+  if (scene.lines?.length) lines.push(`이 사진 자리 안내: ${join(scene.lines.map((s) => inline.plain(s)))}`);
   return lines.join('\n');
 }
 
 export function wantSeconds(doc, p) {
-  const node = getAt(doc, Array.isArray(p) ? p.slice(0, -1) : []);
-  const s = Number(node?.seconds);
+  const scene = slotScene(doc, Array.isArray(p) ? p : []);
+  const s = Number(scene?.kind === 'step' ? scene.step.seconds : NaN);
   const { clipMinSec: min, clipMaxSec: max } = config.media;
   return Math.min(max, Math.max(min, Number.isFinite(s) && s > 0 ? s : 5));
 }

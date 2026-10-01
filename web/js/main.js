@@ -1,11 +1,13 @@
 import { api, initSession, pollJob, sleep, uploadAsset } from './api.js';
 import { createInline } from './inline.js';
 import {
-  clone, docLang, docToMarkdown, fillAssets, getAt, imageSlots, keepAssets, setAt, stepTimeline, stepTitle, uid,
+  clone, docLang, docToMarkdown, fillAssets, getAt, imageSlots, keepAssets, setAt, slotScene, stepTimeline, stepTitle, uid,
 } from './doc.js';
 import { translateFromCache } from './translatable.js';
 import { lintDoc } from './lint.js';
-import { renderDoc, renderStepCard, setInline } from './preview.js';
+import {
+  isVideoSlot, renderDoc, renderSceneCard, renderStepCard, setInline,
+} from './preview.js';
 import { createEditor } from './editor.js';
 import { englishLabel, placeholderBlob, uploadImage } from './slots.js';
 import { createVideoPanel } from './video.js';
@@ -1203,8 +1205,9 @@ function pickFromPc() {
  */
 function onSlotClick(path, el) {
   const node = getAt(state.draft.doc, path) ?? {};
-  // 스텝의 참고 GIF 자리는 창을 띄우지 않는다 — 상자 안에서 [레퍼런스 검색]·[영상으로 자동 생성]·[GIF 업로드] 로 끝낸다.
-  if (node.slot === 'step') return videoPanel.toggle(node.id);
+  // 스텝의 참고 GIF 자리(불러온 브리프는 제품 사진 밖 모든 자리)는 창을 띄우지 않는다 —
+  // 상자 안에서 [레퍼런스 검색]·[영상으로 자동 생성]·[GIF 업로드] 로 끝낸다. 제품 사진은 사진만 올린다.
+  if (isVideoSlot(state.draft.doc, node)) return videoPanel.toggle(node.id);
   slotTarget = { path, el };
   const photos = sourcePhotos();
   if (!photos.length) return pickFromPc();
@@ -1877,25 +1880,43 @@ async function loadReference(again = false) {
   }
 }
 
-/** 스텝 참고 GIF 상자의 [레퍼런스 검색] — slotId 는 그 상자(사진 자리) id. */
+/**
+ * 사진 자리 상자의 [레퍼런스 검색] — slotId 는 그 상자(사진 자리) id.
+ * 스텝의 참고 GIF 는 그 스텝으로, 불러온 브리프의 다른 사진 자리는 그 사진 옆·아래 글(doc.js slotScene)로 찾는다.
+ */
 function openReference(slotId) {
   const doc = currentDoc();
-  const step = (doc?.nodes ?? []).find((n) => n.type === 'step' && n.image?.id === slotId);
-  if (!step) return toast('이 스텝을 문서에서 찾지 못했습니다', true);
-  const tl = stepTimeline(doc).steps.get(step.id);
-  refTarget = { stepId: step.id, key: refKey(doc, step), slotId, step: tl?.index ?? 0 };
-  const scene = `「${inline.plain(stepTitle(step, tl, docLang(doc)))}」 장면이 담긴 틱톡 영상을 찾는 검색어입니다.`;
+  const slots = doc ? imageSlots(doc) : [];
+  const at = slots.findIndex((s) => s.node?.id === slotId);
+  const scene = at >= 0 ? slotScene(doc, slots[at].path) : null;
+  if (!scene) return toast('이 사진 자리를 문서에서 찾지 못했습니다', true);
+  const lang = docLang(doc);
+  // 틱톡 다운로더의 [Step N GIF 생성] 번호 — 스텝이 아닌 자리는 가까운 앞 스텝, 그것도 없으면 몇 번째 사진인지.
+  // (확장은 번호가 0 이면 버튼을 안 띄운다. 어느 자리로 갈지는 번호가 아니라 slotId 가 정한다.)
+  const stepNo = scene.index ?? at + 1;
+  let what;
+  if (scene.kind === 'step') {
+    const tl = stepTimeline(doc).steps.get(scene.step.id);
+    refTarget = { stepId: scene.step.id, key: refKey(doc, scene.step), slotId, step: tl?.index ?? stepNo };
+    what = `「${inline.plain(stepTitle(scene.step, tl, lang))}」 장면이 담긴 틱톡 영상을 찾는 검색어입니다.`;
+    // 오른쪽 카드 — 그 스텝 글을 문서와 똑같이(검색어를 고르며 스텝을 다시 읽을 수 있게)
+    $('ref_step').replaceChildren(renderStepCard(doc, scene.step, { lang }));
+  } else {
+    refTarget = {
+      stepId: slotId, key: docStamp({ scene, brand: doc.meta?.brand, product: doc.meta?.product }), slotId, step: stepNo,
+    };
+    what = `${scene.title ? `「${inline.plain(scene.title)}」 의 ` : ''}사진 자리 — 오른쪽 글(이 사진 옆·아래 글)에 맞는 틱톡 영상을 찾는 검색어입니다.`;
+    $('ref_step').replaceChildren(renderSceneCard(scene));
+  }
   $('ref_where').textContent = extensionVersion()
-    ? `${scene} 누르면 틱톡 검색이 새 탭으로 열립니다. 여러 검색어 탭에서 고른 영상이 한데 모이고, 아무 탭에서나 [Step ${refTarget.step} GIF 생성]을 누르면 전부 이 자리로 들어옵니다.`
-    : `${scene} 누르면 틱톡 검색이 새 탭으로 열립니다.`;
-  // 오른쪽 카드 — 그 스텝 글을 문서와 똑같이(검색어를 고르며 스텝을 다시 읽을 수 있게)
-  $('ref_step').replaceChildren(renderStepCard(doc, step, { lang: docLang(doc) }));
+    ? `${what} 누르면 틱톡 검색이 새 탭으로 열립니다. 여러 검색어 탭에서 고른 영상이 한데 모이고, 아무 탭에서나 [Step ${refTarget.step} GIF 생성]을 누르면 전부 이 자리로 들어옵니다.`
+    : `${what} 누르면 틱톡 검색이 새 탭으로 열립니다.`;
   $('ref_list').replaceChildren();
   setStatus('ref_status', '');
   $('ref_refresh').disabled = false;
   $('ref_refresh').classList.remove('is-loading');
   openDialog('ref_dialog');
-  const hit = refCache.get(step.id);
+  const hit = refCache.get(refTarget.stepId);
   if (hit && hit.key === refTarget.key) return renderRef(hit.keywords);
   loadReference(false);
 }

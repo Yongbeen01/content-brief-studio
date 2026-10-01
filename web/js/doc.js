@@ -5,9 +5,12 @@
  *   lang   = 'en' 이면 글이 이미 영어다(영어 브리프를 불러온 것 · 옮기기를 마친 영어본).
  *   origin = 'import' 이면 기존 브리프를 불러온 것 — 폼 입력(Account ID)이 문서를 덮어쓰지 않는다.
  *   labels = 모든 스텝에 똑같이 적용한 고정 문구 고침 { stepAction: '…' }.
- * 노드: paragraph · heading · bulleted · numbered · divider · callout · table · image · step · grid · wordTable · embed
+ * 노드: paragraph · heading · bulleted · numbered · divider · callout · columns · table · image · step · grid · wordTable · embed
  *   step 은 labels(소제목 고침)·heading(「Step N:」 까지 사람이 바꾼 제목 줄)·extra(오른쪽 칸 끝의 그 밖의 블록)를 가질 수 있다.
  *   image 의 optional = 원본에 사진이 없던 자리 — 비워 두면 노션에 올리지 않는다(회색 이미지를 만들지 않는다).
+ *   image 의 width(px, 노션 본문 708px 기준)·align = 노션에서 줄여 둔 사진 크기(불러온 브리프) — 미리보기만 따른다.
+ *   columns = 노션의 칸 나누기(불러온 브리프 — 사진 왼쪽·글 오른쪽 같은 배치). { columns: Node[][], ratios? }
+ *   bulleted·numbered 의 levels = 줄마다 들여쓰기 깊이(0 부터, 불러온 브리프의 하위 항목). 없으면 모두 0.
  *
  * 번호·시간처럼 순서에서 나오는 값은 **저장하지 않고 그릴 때 계산한다**. 스텝을 하나 끼워 넣어도
  * `Step N`·`0:04–0:10` 이 저절로 맞고, Don'ts 가 늘어도 🔴 금지 표현 번호가 따라간다.
@@ -21,10 +24,22 @@ export function uid() {
 
 export const clone = (v) => JSON.parse(JSON.stringify(v));
 
+/**
+ * 노드 안의 블록 목록(그릇)들 — [경로 조각, 목록]. 박스 안·칸 안·스텝 오른쪽 칸 끝.
+ * 문서를 끝까지 훑는 곳(사진 자리 찾기·그리드 맞추기·검사)이 같이 쓴다. Do's 항목(grid.items)은 블록이 아니라 빠진다.
+ */
+export function childLists(n) {
+  if (n?.type === 'callout') return [[['children'], n.children ?? []]];
+  if (n?.type === 'step') return n.extra?.length ? [[['extra'], n.extra]] : [];
+  if (n?.type === 'columns') return (n.columns ?? []).map((col, c) => [['columns', c], col ?? []]);
+  return [];
+}
+
 /** 새로 들어온 노드(LLM 답)에 id 를 붙인다. 스텝의 사진 자리·그리드 사진 자리도 챙긴다. */
 export function withIds(node) {
   const n = { ...node, id: node.id || uid() };
   if (n.type === 'callout') n.children = (n.children ?? []).map(withIds);
+  if (n.type === 'columns') n.columns = (n.columns ?? []).map((col) => (col ?? []).map(withIds));
   if (n.type === 'step') {
     n.image = n.image?.type === 'image' ? { ...n.image, id: n.image.id || uid() } : stepImage();
     if (n.extra) n.extra = n.extra.map(withIds);
@@ -114,12 +129,17 @@ export function removeAt(root, path) {
   return fixup(next);
 }
 
-/** 편집 뒤 구조 불변식을 다시 맞춘다 — 그리드 사진 자리 수. */
-function fixup(doc) {
+/**
+ * 편집 뒤 구조 불변식을 다시 맞춘다 — 그리드 사진 자리 수, 목록의 들여쓰기 수.
+ * 목록 줄 수가 바뀌었는데 들여쓰기가 그대로면 엉뚱한 줄이 들어가므로 들여쓰기를 버린다(모두 한 단).
+ * 전체 수정(src/brief/revise.js)도 쓴다.
+ */
+export function fixup(doc) {
   const walk = (nodes) => {
     for (const n of nodes ?? []) {
       if (n.type === 'grid') n.images = syncGridImages(n);
-      if (n.type === 'callout') walk(n.children);
+      if ((n.type === 'bulleted' || n.type === 'numbered') && n.levels && n.levels.length !== n.items?.length) delete n.levels;
+      for (const [, list] of childLists(n)) walk(list);
     }
   };
   walk(doc.nodes);
@@ -174,7 +194,7 @@ export function wordTableNumber(doc) {
   const walk = (nodes) => {
     for (const n of nodes ?? []) {
       if (n.type === 'grid' && n.kind === 'dont') count = n.items.length;
-      if (n.type === 'callout') walk(n.children);
+      for (const [, list] of childLists(n)) walk(list);
     }
   };
   walk(doc.nodes);
@@ -246,10 +266,127 @@ export function imageSlots(doc) {
         }));
       }
       if (n.type === 'callout') walk(n.children, [...p, 'children']);
+      if (n.type === 'columns') (n.columns ?? []).forEach((col, c) => walk(col, [...p, 'columns', c]));
     });
   };
   walk(doc.nodes, ['nodes']);
   return out;
+}
+
+// ── 사진 자리가 담을 장면 ───────────────────────────────────────────────────
+
+/** 블록 하나의 글 줄들(평문 아님 — 인라인 마크다운 그대로). 사진·구분선·임베드는 글이 없다. */
+function nodeLines(n, lang) {
+  switch (n?.type) {
+    case 'paragraph':
+    case 'heading': return [nodeText(n, lang)];
+    case 'bulleted':
+    case 'numbered': return [...(n.items ?? [])];
+    case 'table': return tableRows(n, lang).map((r) => r.join(' | '));
+    case 'callout':
+    case 'columns': return childLists(n).flatMap(([, list]) => list.flatMap((c) => nodeLines(c, lang)));
+    case 'grid': return (n.items ?? []).map((it) => {
+      const { title, desc } = gridItemText(it, lang);
+      return desc ? `${title} — ${desc}` : title;
+    });
+    default: return [];
+  }
+}
+
+/** 이 블록부터는 다른 사진의 몫이다 — 사진·스텝, 또는 사진이 든 칸 나누기·박스. */
+const hasPicture = (n) => n?.type === 'image' || n?.type === 'step'
+  || childLists(n).some(([, list]) => list.some(hasPicture));
+
+/**
+ * 사진 자리 하나가 보여 줘야 할 장면 — 영상으로 GIF 만들기·레퍼런스 검색이 이 글을 보고 찾는다.
+ * 브라우저(상자·창)와 서버(구간 고르기·검색어)가 같이 쓴다.
+ *
+ * - 스텝의 참고 GIF 자리 → 그 스텝.
+ * - Do's/Don'ts 예시 이미지 → 그 줄의 두 항목.
+ * - 칸 나누기 안의 사진 → 옆 칸의 글 + 같은 칸에서 그 사진 아래 글(다음 사진 전까지).
+ * - 그 밖의 사진 → 아래로 다음 사진(또는 스텝·큰 제목)이 나오기 전까지의 글.
+ * - 옆·아래에 글이 없으면 위로 올라가 바로 앞의 안내 글을 쓰고, 그 위가 스텝이면 그 스텝의 장면으로 본다
+ *   (「[Please attach this image]」 처럼 스텝 바로 뒤에 붙은 사진).
+ *
+ * @returns {{ kind:'step', step:object, stepPath:any[], index:number|null, lines?:string[] }
+ *          | { kind:'text', title:string, lines:string[], index:number|null } | null}
+ *   index = 가까운 앞 스텝 번호(틱톡 다운로더의 [Step N GIF 생성] 버튼이 쓴다), 없으면 null.
+ */
+export function slotScene(doc, path, lang = docLang(doc)) {
+  if (!doc || !Array.isArray(path)) return null;
+  const at = (p) => getAt(doc, p);
+  if (at(path)?.type !== 'image') return null; // 사진 자리가 아니다(없어진 자리 등)
+  const tl = stepTimeline(doc);
+  const top = Number(path[1]);
+  // 가까운 앞 스텝(맨 위 단계에서) — 번호만 쓴다
+  let index = null;
+  for (let i = top; i >= 0; i -= 1) {
+    const n = doc.nodes?.[i];
+    if (n?.type === 'step') { index = tl.steps.get(n.id)?.index ?? null; break; }
+  }
+  const last = path[path.length - 1];
+  const parentOf = (p) => at(p.slice(0, -1));
+
+  // 스텝의 참고 GIF
+  if (last === 'image' && parentOf(path)?.type === 'step') {
+    const step = parentOf(path);
+    return { kind: 'step', step, stepPath: path.slice(0, -1), index: tl.steps.get(step.id)?.index ?? index };
+  }
+  // 위로 가며 가장 가까운 제목(장면 이름)
+  const titleAbove = (container, i) => {
+    for (let k = i - 1; k >= 0; k -= 1) if (container[k]?.type === 'heading') return nodeText(container[k], lang);
+    for (let k = top - 1; k >= 0; k -= 1) if (doc.nodes[k]?.type === 'heading') return nodeText(doc.nodes[k], lang);
+    return '';
+  };
+
+  // Do's/Don'ts 예시 이미지 — 그 줄의 항목
+  if (path[path.length - 2] === 'images') {
+    const grid = at(path.slice(0, -2));
+    if (grid?.type !== 'grid') return null;
+    const row = gridRows(grid)[Number(last)] ?? [];
+    const lines = row.map((it) => {
+      const { title, desc } = gridItemText(it, lang);
+      return desc ? `${title} — ${desc}` : title;
+    });
+    return { kind: 'text', title: grid.kind === 'dont' ? "Don'ts" : "Do's", lines, index };
+  }
+
+  const container = parentOf(path);
+  if (!Array.isArray(container)) return null;
+  const i = Number(last);
+  const below = [];
+  for (let k = i + 1; k < container.length; k += 1) {
+    const n = container[k];
+    if (hasPicture(n) || (n.type === 'heading' && n.level <= 2)) break;
+    below.push(...nodeLines(n, lang));
+  }
+  // 칸 안이면 옆 칸 글도
+  const beside = [];
+  if (path[path.length - 3] === 'columns') {
+    const cols = at(path.slice(0, -2)) ?? [];
+    cols.forEach((col, c) => {
+      if (c !== Number(path[path.length - 2])) beside.push(...(col ?? []).flatMap((n) => nodeLines(n, lang)));
+    });
+  }
+  const lines = [...beside, ...below].map((s) => String(s).trim()).filter(Boolean);
+  if (lines.length) return { kind: 'text', title: titleAbove(container, i), lines, index };
+
+  // 옆·아래가 비었다 — 위로. 칸 안의 사진이면 칸 나누기 블록 자리에서 올라간다.
+  const anchor = path[path.length - 3] === 'columns' ? path.slice(0, -3) : path;
+  const box = parentOf(anchor);
+  const above = [];
+  for (let k = Number(anchor[anchor.length - 1]) - 1; k >= 0 && Array.isArray(box); k -= 1) {
+    const n = box[k];
+    if (n?.type === 'step') {
+      return {
+        kind: 'step', step: n, stepPath: [...anchor.slice(0, -1), k], index: tl.steps.get(n.id)?.index ?? index, lines: above,
+      };
+    }
+    if (hasPicture(n) || (n?.type === 'heading' && n.level <= 2)) break;
+    if (n?.type === 'divider') continue;
+    above.unshift(...nodeLines(n, lang).map((s) => String(s).trim()).filter(Boolean));
+  }
+  return { kind: 'text', title: titleAbove(container, i), lines: above, index };
 }
 
 /**
@@ -298,9 +435,22 @@ export function docToMarkdown(doc, lang = 'ko') {
     switch (n.type) {
       case 'paragraph': lines.push(q(nodeText(n, lang)), quote ? quote.trimEnd() : ''); break;
       case 'heading': lines.push(q(`${'#'.repeat(n.level)} ${nodeText(n, lang)}`), ''); break;
-      case 'bulleted': lines.push(...n.items.map((t) => q(`- ${t}`)), ''); break;
-      case 'numbered': lines.push(...n.items.map((t, i) => q(`${i + 1}. ${t}`)), ''); break;
+      case 'bulleted': lines.push(...n.items.map((t, i) => q(`${'  '.repeat(n.levels?.[i] ?? 0)}- ${t}`)), ''); break;
+      case 'numbered': {
+        const count = [];
+        n.items.forEach((t, i) => {
+          const lv = n.levels?.[i] ?? 0;
+          count.length = lv + 1;
+          count[lv] = (count[lv] ?? 0) + 1;
+          lines.push(q(`${'   '.repeat(lv)}${count[lv]}. ${t}`));
+        });
+        lines.push('');
+        break;
+      }
       case 'divider': lines.push('---', ''); break;
+      case 'columns':
+        for (const col of n.columns ?? []) for (const c of col ?? []) emit(c, quote);
+        break;
       case 'image':
         if (n.asset || !n.optional) lines.push(q(img(n.slot === 'product' ? '제품 이미지' : n.label)), '');
         break;

@@ -4,7 +4,9 @@ import { runClaude, ClaudeError } from '../claude/cli.js';
 import { extractJsonObject } from '../claude/json.js';
 import { REFERENCE, REFERENCE_COUNT, validate } from './schema.js';
 import { referenceSystem, referenceUser } from './prompts.js';
-import { nodeText, stepTimeline, stepTitle, durationText } from '../../web/js/doc.js';
+import {
+  durationText, imageSlots, nodeText, slotScene, stepTimeline, stepTitle,
+} from '../../web/js/doc.js';
 import { inline } from './inline.js';
 
 /**
@@ -34,10 +36,25 @@ export function brandProduct(doc) {
 /**
  * 스텝 → 프롬프트의 {{step}} 자리. 칸 이름은 기준 문안이 부르는 이름([행동]·[화면]·[자막]·[내레이션]·[시간])으로 고정한다 —
  * 사람이 소제목을 바꿔 뒀어도 기준과 어긋나지 않게.
+ * stepId 가 불러온 브리프의 스텝 아닌 사진 자리 id 면 그 사진 옆·아래 글을 [행동] 줄로 쓴다(doc.js slotScene).
+ * 글이 없고 바로 위가 스텝이면(스텝 뒤에 붙은 사진) 그 스텝으로 찾는다.
  */
 export function stepForSearch(doc, stepId) {
-  const step = (doc?.nodes ?? []).find((n) => n.type === 'step' && (n.id === stepId || n.image?.id === stepId));
-  if (!step) return null;
+  let step = (doc?.nodes ?? []).find((n) => n.type === 'step' && (n.id === stepId || n.image?.id === stepId));
+  if (!step) {
+    const slot = imageSlots(doc ?? {}).find((s) => s.node?.id === stepId);
+    const scene = slot ? slotScene(doc, slot.path) : null;
+    if (!scene) return null;
+    if (scene.kind === 'step') step = scene.step;
+    else {
+      const lines = scene.lines.map(plain).filter(Boolean);
+      const title = plain(scene.title) || '사진 자리';
+      const text = [title, ...(lines.length ? ['[행동]', ...lines.map((l) => `- ${l}`)] : [])].join('\n');
+      return {
+        step: null, index: null, title, text,
+      };
+    }
+  }
   const tl = stepTimeline(doc).steps.get(step.id);
   const block = (label, items, bullet) => {
     const lines = (items ?? []).map(plain).filter(Boolean);

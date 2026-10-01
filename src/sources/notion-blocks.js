@@ -10,57 +10,89 @@ import { dashed, extractPageId, loadPublicBlocks, signPublicFiles } from './noti
  * 이 나무를 src/brief/import.js 가 우리 문서 트리로 옮긴다. PDF 는 import-pdf.js 가 같은 나무를 만든다.
  *
  * 블록: { t, … }
- *   h(level, text, color) · p(text, color) · ul/ol/todo(text, checked) · quote · toggle · callout(icon, color, text)
- *   divider · image(src, ratio) · embed(url, kind) · file(name) · table(rows, header) · columns(columns: 블록[][])
- *   code(text) · page(title, id). 들여쓴 자식은 children.
- * text 는 우리 인라인 마크다운(**굵게**, *기울임*, ~~취소~~, `코드`, [글](주소)) — 미리보기·노션 변환이 그대로 읽는다.
+ *   h(level, text, color) · p(text, color) · ul/ol/todo(text, checked) · quote · toggle · callout(icon, color, text, textColor)
+ *   divider · image(src, ratio, width?, align?) · embed(url, kind) · file(name) · table(rows, header)
+ *   columns(columns: 블록[][], ratios?) · code(text) · page(title, id). 들여쓴 자식은 children.
+ * text 는 우리 인라인 마크다운(**굵게**, *기울임*, ~~취소~~, `코드`, [글](주소)) + 서식 태그(<span color>, <u> …,
+ * web/js/inline.js) — 미리보기·노션 변환이 그대로 읽는다.
  *
  * 사진은 여기서 받지 않고 자리(src)만 적어 둔다 — 글을 먼저 보여 주고 사진은 뒤에서 받는다(fetchImage).
  */
 
 // ── 글 조각 → 인라인 마크다운 ────────────────────────────────────────────────
 
-/** 마크다운으로 읽힐 수 있는 글자를 막는다. 낱말 안의 밑줄(taesi_k)은 그대로 둔다(강조로 안 읽힌다). */
+/**
+ * 마크다운·서식 태그로 읽힐 수 있는 글자를 막는다. 낱말 안의 밑줄(taesi_k)은 그대로 둔다(강조로 안 읽힌다).
+ * 원문에 `<b>` 나 `<span color="red">` 같은 글자가 있으면 앞에 \ 를 붙인다(web/js/inline.js 의 태그와 겹치지 않게).
+ */
 export function escapeMd(text) {
   return String(text)
     .replace(/[\\`*~[\]]/g, '\\$&')
     .replace(/&(?=#?[A-Za-z0-9]+;)/g, '\\&')
-    .replace(/_/g, (m, at, s) => (/[A-Za-z0-9]/.test(s[at - 1] ?? '') && /[A-Za-z0-9]/.test(s[at + 1] ?? '') ? '_' : '\\_'));
+    .replace(/_/g, (m, at, s) => (/[A-Za-z0-9]/.test(s[at - 1] ?? '') && /[A-Za-z0-9]/.test(s[at + 1] ?? '') ? '_' : '\\_'))
+    .replace(/<(?=\/?(?:b|i|s|u|span)(?:>| color="))/g, '\\<');
 }
 
 const SAFE_LINK = /^(https?:|mailto:)/i;
 const TEXT_COLORS = new Set(['gray', 'brown', 'orange', 'yellow', 'green', 'teal', 'blue', 'purple', 'pink', 'red']);
 
+/** 노션 색 이름 → 우리 색 이름. 글자색(red)·바탕색(red_background) 둘 다 받고, 모르는 것은 기본색. */
+const segColor = (c) => {
+  const s = String(c ?? '');
+  return TEXT_COLORS.has(s.replace(/_background$/, '')) ? s : 'default';
+};
+
 /** 줄 끝 공백은 마크다운이 먹는다 — 원문에서도 미리 뗀다(보이는 차이 없음). */
 const tidy = (t) => String(t ?? '').replace(/[ \t]+\n/g, '\n');
 
+const sameLook = (a, b) => ['bold', 'italic', 'strike', 'underline', 'code', 'color', 'href'].every((k) => (a[k] || '') === (b[k] || ''));
+
 /**
- * @param {{ text:string, bold?:boolean, italic?:boolean, strike?:boolean, code?:boolean, href?:string, color?:string }[]} segs
+ * 노션 글 조각 → 우리 인라인 마크다운. 굵게·기울임·취소는 마크다운(**…**)으로, 마크다운에 없는 밑줄·부분 색은
+ * 서식 태그(<u>, <span color>)로 쓴다(web/js/inline.js).
+ * @param {{ text:string, bold?:boolean, italic?:boolean, strike?:boolean, underline?:boolean, code?:boolean, href?:string, color?:string }[]} segs
  * @returns {{ text: string, color: string }}  color = 글 전체가 한 글자색이면 그 색(블록 색으로 쓴다)
  */
 export function segmentsToMarkdown(segs) {
-  const list = (segs ?? []).map((s) => ({ ...s, text: tidy(s.text) })).filter((s) => s.text);
+  // 노션은 같은 모양의 글을 여러 조각으로 쪼개 주기도 한다(색·링크가 바뀌던 자리) — 붙여야 ** 가 끊기지 않는다.
+  const list = [];
+  for (const s of segs ?? []) {
+    const seg = { ...s, text: tidy(s.text), color: segColor(s.color) };
+    if (!seg.text) continue;
+    const prev = list[list.length - 1];
+    if (prev && sameLook(prev, seg)) prev.text += seg.text;
+    else list.push(seg);
+  }
   const plainText = tidy(list.map((s) => s.text).join(''));
-  const parts = list.map((s) => {
-    const m = s.text.match(/^(\s*)([\s\S]*?)(\s*)$/);
-    const [, lead, core, trail] = m;
+
+  // 글 전체가 한 글자색이면 블록 색으로 쓴다. 섞여 있으면(「💬 Mandatory Subtitle」 의 빨간 글자만) 조각마다 단다.
+  // 바탕색(형광펜)은 노션에서 글자에만 칠해지므로 블록 색으로 올리지 않는다.
+  const colors = new Set(list.filter((s) => s.text.trim()).map((s) => s.color));
+  const only = colors.size === 1 ? [...colors][0] : 'default';
+  const blockColor = only.endsWith('_background') ? 'default' : only;
+
+  /** tags = 굵게·기울임·취소도 태그로(마크다운 ** 가 앞뒤 문장부호 때문에 안 먹을 때). */
+  const render = (tags) => list.map((s) => {
+    const [, lead, core, trail] = s.text.match(/^(\s*)([\s\S]*?)(\s*)$/);
     if (!core) return s.text;
     let x = s.code && !core.includes('`') ? `\`${core}\`` : escapeMd(core);
-    if (s.strike) x = `~~${x}~~`;
-    if (s.italic) x = `*${x}*`;
-    if (s.bold) x = `**${x}**`;
+    if (s.strike) x = tags ? `<s>${x}</s>` : `~~${x}~~`;
+    if (s.italic) x = tags ? `<i>${x}</i>` : `*${x}*`;
+    if (s.bold) x = tags ? `<b>${x}</b>` : `**${x}**`;
+    if (s.underline) x = `<u>${x}</u>`;
+    if (s.color !== 'default' && s.color !== blockColor) x = `<span color="${s.color}">${x}</span>`;
     // 주소 속 괄호·공백은 마크다운 링크를 끊는다(encodeURIComponent 는 괄호를 그대로 둔다).
     if (s.href && SAFE_LINK.test(s.href)) x = `[${x}](${s.href.replace(/[()\s]/g, (c) => ({ '(': '%28', ')': '%29' }[c] ?? '%20'))})`;
     return lead + x + trail;
-  });
-  let text = parts.join('');
-  // 모양을 살린 글이 평문과 다르게 읽히면(마크다운 규칙에 걸림) 모양을 버리고 글자만 살린다.
-  if (inline.plain(text) !== inline.plain(escapeMd(plainText))) text = escapeMd(plainText);
+  }).join('');
 
-  const inked = list.filter((s) => s.text.trim());
-  const colors = new Set(inked.map((s) => s.color || 'default'));
-  const only = colors.size === 1 ? [...colors][0] : 'default';
-  return { text, color: TEXT_COLORS.has(only) ? only : 'default' };
+  // 모양을 살린 글이 평문과 다르게 읽히면(`**"quote"**word` 처럼 마크다운 규칙에 걸림) 태그로 다시 쓴다.
+  // 그래도 어긋나면 모양을 버리고 글자만 살린다.
+  const want = inline.plain(escapeMd(plainText));
+  let text = render(false);
+  if (inline.plain(text) !== want) text = render(true);
+  if (inline.plain(text) !== want) text = escapeMd(plainText);
+  return { text, color: blockColor };
 }
 
 // ── 공개 페이지(/api/v3 recordMap) ──────────────────────────────────────────
@@ -74,6 +106,7 @@ function v3Segments(title, blocks) {
         case 'b': seg.bold = true; break;
         case 'i': seg.italic = true; break;
         case 's': seg.strike = true; break;
+        case '_': seg.underline = true; break;
         case 'c': seg.code = true; break;
         case 'a': seg.href = String(a[1] ?? ''); break;
         case 'h': seg.color = String(a[1] ?? ''); break;
@@ -112,6 +145,17 @@ function v3ImageSrc(b) {
   return { kind: 'v3', src, blockId: b.id, spaceId: b.space_id ?? '' };
 }
 
+/**
+ * 노션에서 줄여 둔 사진의 너비(px, 노션 본문 폭 708px 기준)와 정렬. 본문 폭 그대로면 너비 없음.
+ * 미리보기만 이 크기로 그린다 — 노션 API 는 사진 크기를 받지 않아 올리면 다시 본문 폭이 된다.
+ */
+function v3ImageSize(b) {
+  const f = b.format ?? {};
+  const width = Number(f.block_width) || 0;
+  if (f.block_page_width || f.block_full_width || !width) return {};
+  return { width: Math.round(width), ...(['left', 'right'].includes(f.block_alignment) ? { align: f.block_alignment } : {}) };
+}
+
 export function recordMapToBlocks(rootId, blocks) {
   const seen = new Set();
   const conv = (id) => {
@@ -141,11 +185,14 @@ export function recordMapToBlocks(rootId, blocks) {
       case 'quote': return [{ t: 'quote', text: txt().text, children: kids() }];
       case 'toggle': return [{ t: 'toggle', text: txt().text, children: kids() }];
       case 'callout': {
+        // 박스 제목 줄의 글자색(예: 청록 글씨)은 textColor — 박스 바탕색(color)과 따로 간다.
         const r = txt();
-        return [{ t: 'callout', icon: emojiIcon(b.format?.page_icon), color: color('gray_background'), text: r.text, children: kids() }];
+        return [{
+          t: 'callout', icon: emojiIcon(b.format?.page_icon), color: color('gray_background'), text: r.text, textColor: r.color, children: kids(),
+        }];
       }
       case 'divider': return [{ t: 'divider' }];
-      case 'image': return [{ t: 'image', src: v3ImageSrc(b), ratio: Number(b.format?.block_aspect_ratio) || 0 }];
+      case 'image': return [{ t: 'image', src: v3ImageSrc(b), ratio: Number(b.format?.block_aspect_ratio) || 0, ...v3ImageSize(b) }];
       case 'table': {
         const order = b.format?.table_block_column_order ?? [];
         const rows = (b.content ?? []).map((rid) => {
@@ -155,8 +202,14 @@ export function recordMapToBlocks(rootId, blocks) {
         });
         return [{ t: 'table', header: !!b.format?.table_block_column_header, rows }];
       }
-      case 'column_list':
-        return [{ t: 'columns', columns: (b.content ?? []).map((cid) => (blocks[cid]?.content ?? []).flatMap(conv)) }];
+      case 'column_list': {
+        // 칸 너비 비율(노션이 칸마다 column_ratio 로 준다 — 없으면 같은 너비)
+        const cols = (b.content ?? []).filter((cid) => blocks[cid] && blocks[cid].alive !== false);
+        const ratios = cols.map((cid) => Number(blocks[cid]?.format?.column_ratio) || 0);
+        return [{
+          t: 'columns', columns: cols.map((cid) => (blocks[cid]?.content ?? []).flatMap(conv)), ...(ratios.every((x) => x > 0) ? { ratios } : {}),
+        }];
+      }
       case 'column': return kids();
       case 'code': return [{ t: 'code', text: v3Plain(b.properties?.title) }];
       case 'equation': return [{ t: 'p', text: `\`${v3Plain(b.properties?.title).replace(/`/g, '')}\`` }];
@@ -203,6 +256,7 @@ function apiSegments(rich) {
     bold: !!r.annotations?.bold,
     italic: !!r.annotations?.italic,
     strike: !!r.annotations?.strikethrough,
+    underline: !!r.annotations?.underline,
     code: !!r.annotations?.code,
     href: String(r.href ?? r.text?.link?.url ?? ''),
     color: String(r.annotations?.color ?? 'default'),
@@ -226,8 +280,12 @@ function apiConv(b, kids, rows) {
     case 'to_do': return [{ t: 'todo', text: apiText(p.rich_text).text, checked: !!p.checked, children: kids }];
     case 'quote': return [{ t: 'quote', text: apiText(p.rich_text).text, children: kids }];
     case 'toggle': return [{ t: 'toggle', text: apiText(p.rich_text).text, children: kids }];
-    case 'callout':
-      return [{ t: 'callout', icon: p.icon?.type === 'emoji' ? p.icon.emoji : '', color: color('gray_background'), text: apiText(p.rich_text).text, children: kids }];
+    case 'callout': {
+      const r = apiText(p.rich_text);
+      return [{
+        t: 'callout', icon: p.icon?.type === 'emoji' ? p.icon.emoji : '', color: color('gray_background'), text: r.text, textColor: r.color, children: kids,
+      }];
+    }
     case 'divider': return [{ t: 'divider' }];
     case 'image': {
       const url = p.type === 'file' ? p.file?.url : p.external?.url;
