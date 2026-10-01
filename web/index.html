@@ -147,6 +147,20 @@
         </div>
         <p class="fx-status" id="form_status"></p>
 
+        <!-- 전체 수정 — 기존 브리프를 불러온 뒤에만 보인다. 적은 지시대로 Claude 가 브리프 전체에서
+             필요한 곳만 고친다(src/brief/revise.js). 말하지 않은 곳은 글자 그대로 남는다. -->
+        <div class="card revise-card hidden" id="revise_section">
+          <label for="revise_text">전체 수정</label>
+          <p class="form-hint">고치고 싶은 내용을 적으면 Claude 가 브리프 전체를 읽고 그대로 고칩니다. 「Step 3 자막을 더 짧게」처럼 자리를 짚어도 되고, 「전체적으로 더 캐주얼하게」처럼 전반에 대해 적어도 됩니다. 적지 않은 곳은 그대로 둡니다.</p>
+          <textarea id="revise_text" class="tall" placeholder="예) Step 2 와 Step 3 순서를 바꿔 줘&#10;예) Do's 3번은 '밝은 자연광에서 찍기'로 바꿔 줘&#10;예) 자막을 전부 한 줄로 짧게 줄여 줘"></textarea>
+          <div class="revise-actions">
+            <button type="button" class="primary-btn" id="revise_btn"><span class="btn-text">수정 적용</span><span class="loader"></span></button>
+            <button type="button" class="secondary-btn hidden" id="revise_cancel">멈추기</button>
+          </div>
+          <p class="fx-status" id="revise_status"></p>
+          <ul class="fx-warn-list revise-result hidden" id="revise_result"></ul>
+        </div>
+
         <div class="card progress-panel hidden" id="progress_panel">
           <div class="progress-head"><h3 id="progress_title">기획서를 만들고 있습니다</h3><span class="progress-eta" id="progress_eta"></span></div>
           <ol class="progress-steps" id="progress_steps"></ol>

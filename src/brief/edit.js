@@ -35,8 +35,8 @@ function nodeLabel(doc, node) {
   }
 }
 
-/** 경로 → 사람이 읽는 위치 설명(프롬프트용). 직전 제목까지 붙여 준다. */
-function describe(doc, p) {
+/** 경로 → 사람이 읽는 위치 설명(프롬프트용). 직전 제목까지 붙여 준다. 전체 수정(revise.js)도 쓴다. */
+export function describe(doc, p) {
   const top = Number(p[1]);
   let section = '';
   for (let i = top; i >= 0; i -= 1) {

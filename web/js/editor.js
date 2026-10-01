@@ -334,12 +334,12 @@ export function createEditor({ root, getDoc, getSourceNotes, commit, isLocked, s
   });
   window.addEventListener('resize', () => { if (target) place(target.el); });
 
-  /** 다시 그린 뒤 방금 바뀐 곳을 잠깐 반짝인다. */
-  function flash(path) {
+  /** 다시 그린 뒤 방금 바뀐 곳을 잠깐 반짝인다. 여러 곳(전체 수정)이면 첫 곳으로만 화면을 옮긴다(scroll). */
+  function flash(path, { scroll = true } = {}) {
     const e = findByPath(root, path);
     if (!e) return;
     e.classList.add('is-flash');
-    e.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    if (scroll) e.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     setTimeout(() => e.classList.remove('is-flash'), 1500);
   }
 

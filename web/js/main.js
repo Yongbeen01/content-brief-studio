@@ -48,6 +48,10 @@ const state = {
   generateJob: null,
   /** 기존 브리프 불러오기 작업 — 글이 먼저 오고 사진은 뒤따른다(그동안 고칠 수 있다). */
   importJob: null,
+  /** 전체 수정 작업(불러온 브리프를 지시 하나로 고친다) — 도는 동안 다른 편집은 막는다 */
+  reviseJob: null,
+  /** 마지막 전체 수정 — { depth: 그때의 되돌리기 기록 수, instruction }. 그 기록까지 되돌리면 안내를 지운다 */
+  reviseLast: null,
   /** 'ko' = 고치는 초안, 'en' = 노션에 올라갈 영어본(읽기 전용) */
   lang: 'ko',
   /** 아카이브 목록(요약) — 새것이 앞 */
@@ -412,6 +416,7 @@ function applyMode() {
     : '왼쪽을 채우고 [생성]을 누르면 여기에 노션 페이지 모양으로 나옵니다.';
   if (!state.busy) $('generate_btn').querySelector('.btn-text').textContent = imp ? '불러오기' : '생성';
   renderImportSource();
+  renderRevise();
 }
 
 function setMode(mode) {
@@ -687,6 +692,7 @@ function renderPreview() {
   $('source_notes_body').textContent = state.draft.sourceNotes ?? '';
   renderWarnings();
   renderPublished();
+  renderRevise();
 }
 
 /**
@@ -715,9 +721,16 @@ function commitDoc(next, { flashPath, keep } = {}) {
 
 function undo() {
   if (!state.undo.length || state.busy) return;
+  // 이번 되돌리기가 전체 수정을 취소하는 것이면 그 결과 안내를 지우고, 적었던 지시를 칸에 돌려놓는다(고쳐 다시 시도하게).
+  const revised = state.reviseLast?.depth === state.undo.length ? state.reviseLast : null;
   state.draft.doc = state.undo.pop();
   renderPreview();
   scheduleSave();
+  if (revised) {
+    resetRevise();
+    if (!$('revise_text').value.trim()) $('revise_text').value = revised.instruction;
+    setStatus('revise_status', '전체 수정을 되돌렸습니다 — 지시를 고쳐 다시 적용할 수 있습니다');
+  }
   toast('되돌렸습니다');
 }
 
@@ -786,6 +799,7 @@ function setBusy(on) {
   renderCampaign(); // 작업 중에는 캠페인을 못 바꾼다
   $('undo_btn').disabled = !state.undo.length || on;
   $('publish_btn').disabled = !state.draft.doc || on;
+  renderRevise();
   // 작업이 끝나면 다시 그려서 누를 곳·추가할 틈을 되살린다. 작업 중에 그린 화면은 편집이 꺼진 모양이다.
   if (was && !on && state.draft.doc) renderPreview();
 }
@@ -903,6 +917,7 @@ function showImported(r) {
   // 생성한 기획서가 있던 초안이면 새 초안으로 — 앞의 기획서는 아카이브에서 그대로 열린다.
   if (state.draft.generation) forkDraft(uid() + uid());
   state.draft.inputs.briefName = ''; // 예전 초안에 남은 이름이 원래 제목을 가리지 않게
+  resetRevise();
   commitDoc(r.doc);
   if (r.docEn) {
     state.draft.docEn = r.docEn;
@@ -1007,6 +1022,103 @@ async function runImport() {
     btn.textContent = isImport() ? '불러오기' : '생성';
     setBusy(false);
     renderPreview();
+  }
+}
+
+// ── 전체 수정 ───────────────────────────────────────────────────────────────
+
+/**
+ * 전체 수정 칸 — [기존 브리프 업로드] 탭에서 불러오기가 끝난 뒤(사진까지 다 받은 뒤)에만 보인다.
+ * 탭은 왼쪽만 바꾸고 미리보기는 그대로 두므로, 미리보기가 새로 만든 기획서면 숨는다.
+ */
+function renderRevise() {
+  const show = isImport() && state.draft?.doc?.origin === 'import' && !state.importJob;
+  $('revise_section').classList.toggle('hidden', !show);
+  if (!show) return;
+  const running = !!state.reviseJob;
+  const btn = $('revise_btn');
+  btn.disabled = running || state.busy;
+  btn.classList.toggle('is-loading', running);
+  btn.querySelector('.btn-text').textContent = running ? '고치는 중…' : '수정 적용';
+  $('revise_text').readOnly = running;
+  $('revise_cancel').classList.toggle('hidden', !running);
+}
+
+/** Claude 가 무엇을 바꿨는지(요약)와 못 한 것(skipped)을 칸 아래에 보여 준다. */
+function renderReviseResult(summary = [], skipped = []) {
+  const li = (text, cls) => Object.assign(document.createElement('li'), { className: cls, textContent: text });
+  const list = $('revise_result');
+  list.replaceChildren(...summary.map((t) => li(t, '')), ...skipped.map((t) => li(t, 'warn')));
+  list.classList.toggle('hidden', !list.children.length);
+}
+
+/** 다른 브리프로 바뀌거나 되돌리면 지난 수정 결과는 지운다. */
+function resetRevise() {
+  state.reviseLast = null;
+  setStatus('revise_status', '');
+  renderReviseResult();
+}
+
+/**
+ * 적은 지시대로 브리프 전체를 고친다. 서버는 바꿀 자리만 받아 끼우므로 적지 않은 곳은 글자 그대로다.
+ * 결과는 되돌리기 한 번으로 통째로 돌릴 수 있고, 바뀐 곳은 미리보기에서 반짝인다.
+ */
+async function runRevise() {
+  if (state.busy || state.reviseJob) return;
+  const instruction = $('revise_text').value.trim();
+  if (!instruction) {
+    setStatus('revise_status', '어떻게 고칠지 적어 주세요', 'bad');
+    $('revise_text').focus();
+    return;
+  }
+  if (state.claude.found === false) return toast('Claude Code 가 설치되어 있지 않습니다', true);
+  if (state.claude.loggedIn === false) {
+    toast('먼저 오른쪽 위 [Claude 로그인]을 눌러 주세요', true);
+    $('claude_btn').focus();
+    return;
+  }
+  editor?.close();
+  const started = Date.now();
+  let chars = 0;
+  state.reviseJob = 'starting';
+  renderReviseResult();
+  setBusy(true);
+  const tick = () => setStatus('revise_status', `Claude 가 브리프 전체를 읽고 고치는 중… ${fmtElapsed(Date.now() - started)}${chars ? ` · ${chars.toLocaleString()}자` : ''}`, 'busy');
+  tick();
+  const timer = setInterval(tick, 1000);
+  try {
+    const { jobId } = await api('POST', '/api/revise', { doc: clone(currentDoc()), instruction, sourceNotes: state.draft.sourceNotes ?? '' });
+    state.reviseJob = jobId;
+    const job = await pollJob(jobId, (j) => { chars = j.chars || chars; });
+    clearInterval(timer);
+    const took = fmtElapsed(Date.now() - started);
+    if (job.status !== 'done') {
+      setStatus('revise_status', job.status === 'cancelled' ? '멈췄습니다' : (job.error?.message ?? '고치지 못했습니다'), 'bad');
+      return;
+    }
+    const r = job.result;
+    const n = Object.values(r.counts ?? {}).reduce((a, b) => a + b, 0);
+    state.reviseJob = null;
+    setBusy(false); // 먼저 풀어야 결과가 고칠 수 있는 모양으로 그려진다
+    if (n) {
+      // 도는 동안 영상 상자에서 GIF 가 들어왔을 수 있다 — 그건 살려서 합친다.
+      commitDoc(r.doc, { keep: true });
+      state.reviseLast = { depth: state.undo.length, instruction };
+      (r.changed ?? []).forEach((p, i) => editor?.flash(p, { scroll: i === 0 }));
+      $('revise_text').value = '';
+      setStatus('revise_status', `${n}곳을 고쳤습니다 (${took}) — 마음에 들지 않으면 미리보기 위 [되돌리기]를 누르세요`, 'ok');
+      toast('전체 수정을 반영했습니다');
+    } else {
+      setStatus('revise_status', `바꾼 곳이 없습니다 (${took})`, 'warn');
+    }
+    renderReviseResult(r.summary, r.skipped);
+  } catch (e) {
+    setStatus('revise_status', e.message, 'bad');
+  } finally {
+    clearInterval(timer);
+    state.reviseJob = null;
+    if (state.busy) setBusy(false);
+    else renderRevise();
   }
 }
 
@@ -1805,6 +1917,7 @@ async function useDraft(draft) {
   state.undo = [];
   state.lang = 'ko';
   state.sources.clear();
+  resetRevise();
   fillForm(state.draft.inputs);
   const ids = trackedSourceIds();
   if (ids.length) {
@@ -1835,6 +1948,7 @@ function startNew() {
   state.draft = newDraft();
   state.undo = [];
   state.sources.clear();
+  resetRevise();
   fillForm(state.draft.inputs);
   renderSources();
   applyMode();
@@ -1870,6 +1984,15 @@ function wire() {
 
   $('ref_refresh').addEventListener('click', () => loadReference(true));
   $('generate_btn').addEventListener('click', () => (isImport() ? runImport() : generate()));
+  // 전체 수정 — Ctrl+Enter 로도 적용, 도는 중이면 [멈추기]
+  $('revise_btn').addEventListener('click', runRevise);
+  $('revise_text').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.isComposing) { e.preventDefault(); runRevise(); }
+  });
+  $('revise_cancel').addEventListener('click', async () => {
+    const job = state.reviseJob;
+    if (job && job !== 'starting') await api('POST', `/api/jobs/${job}/cancel`).catch(() => {});
+  });
   $('progress_cancel').addEventListener('click', async () => {
     const job = state.importJob ?? state.generateJob;
     if (job && job !== 'starting') await api('POST', `/api/jobs/${job}/cancel`).catch(() => {});

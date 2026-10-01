@@ -19,6 +19,7 @@ import { makeClipAsset, makePreviews } from './video/clip.js';
 import { verifyPicks } from './video/verify.js';
 import { toolsStatus } from './media/tools.js';
 import { runEdit, runInsert } from './brief/edit.js';
+import { runRevise } from './brief/revise.js';
 import { translateDoc } from './brief/translate.js';
 import { importBrief } from './brief/import.js';
 import { transcribePdf } from './brief/import-pdf.js';
@@ -418,6 +419,14 @@ async function handleApi(req, res, url) {
       progress({ phase: 'edit', detail: 'Claude 가 고치는 중' });
       return runEdit({ doc: body.doc, path: body.path, instruction: body.instruction, sourceNotes: body.sourceNotes, jobDir: dir, signal });
     });
+    return json(res, 200, { jobId: job.id });
+  }
+  // 전체 수정 — 지시 하나로 문서 전체에서 필요한 곳만 고친다(바꿀 자리만 받아 끼운다).
+  if (m === 'POST' && p === '/api/revise') {
+    const body = await readJson(req, 16 * 1024 * 1024);
+    const job = startJob('revise', ({ signal, dir, progress }) => runRevise({
+      doc: body.doc, instruction: body.instruction, sourceNotes: body.sourceNotes, jobDir: dir, signal, onProgress: progress,
+    }));
     return json(res, 200, { jobId: job.id });
   }
   if (m === 'POST' && p === '/api/insert') {

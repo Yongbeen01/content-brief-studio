@@ -324,6 +324,13 @@ input.is-invalid, textarea.is-invalid { border-color: var(--fx-error); }
   white-space: nowrap;
 }
 
+/* ── 전체 수정(불러온 브리프) ────────────────────────────── */
+.revise-card { margin-top: 12px; }
+.revise-actions { display: flex; gap: 8px; margin-top: 10px; }
+.revise-actions .secondary-btn { flex: none; padding: 8px 14px; }
+.revise-result { margin-top: 10px; }
+.revise-result li { background: var(--fx-sunken); }
+
 /* ── 진행 ────────────────────────────────────────────────── */
 .progress-panel { padding: 16px 18px; margin-top: 12px; }
 .progress-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; gap: 12px; }

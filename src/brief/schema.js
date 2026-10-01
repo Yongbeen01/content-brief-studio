@@ -167,3 +167,41 @@ export const INSERT = {
   callout: obj({ nodes: { type: 'array', items: SIMPLE_NODE, minItems: 1, maxItems: 6 } }),
   grid: obj({ items: { type: 'array', items: GRID_ITEM, minItems: 1, maxItems: 4 } }),
 };
+
+// ── 전체 수정 (src/brief/revise.js) ──────────────────────────────────────────
+
+/**
+ * 자리 종류 → 고친 값의 모양. 한 자리 편집(EDIT)과 같은 모양이지만 불러온 브리프에 맞게 너그럽다 —
+ * 원본 스텝은 Subtitle 이 없거나 Action 이 여섯 줄을 넘기도 하고, 표가 여섯 칸보다 넓기도 하다.
+ */
+export const REVISE_VALUE = {
+  text: obj({ text: str }),
+  items: obj({ items: strs(1, 40) }), // 목록 블록 — 비우려면 지운다
+  field: obj({ items: strs(0, 20) }), // 스텝 칸(Action·Visual·Subtitle·Narration) — 비워도 된다
+  seconds: obj({ seconds: { type: 'integer', minimum: 1, maximum: 30 } }),
+  stepHead: obj({ title: { type: 'string', minLength: 1 }, hook: { type: 'boolean' }, star: { type: 'boolean' } }),
+  gridItem: GRID_ITEM,
+  table: obj({ rows: { type: 'array', items: strs(1, 12), minItems: 1 } }),
+  row: obj({ cells: strs(1, 12) }),
+  wordTable: obj({ note: str, rows: { type: 'array', items: WORD_ROW, minItems: 1 } }),
+};
+
+/** 넣는 자리(그릇) 종류 → 넣을 값의 모양. simple = 박스 안·스텝 오른쪽 칸 끝. */
+export const REVISE_INSERT = {
+  top: obj({ nodes: { type: 'array', items: TOP_NODE, minItems: 1, maxItems: 10 } }),
+  simple: obj({ nodes: { type: 'array', items: SIMPLE_NODE, minItems: 1, maxItems: 10 } }),
+  grid: obj({ items: { type: 'array', items: GRID_ITEM, minItems: 1, maxItems: 6 } }),
+};
+
+const REF = { type: 'string', minLength: 2 };
+const POSITION = { type: 'string', enum: ['after', 'before'] };
+
+/** 전체 수정 답 — 바꿀 자리만. 언급하지 않은 자리는 그대로 남는다. */
+export const REVISE = obj({
+  edits: { type: 'array', items: obj({ ref: REF, value: { anyOf: Object.values(REVISE_VALUE) } }) },
+  inserts: { type: 'array', items: obj({ ref: REF, position: POSITION, value: { anyOf: [REVISE_INSERT.top, REVISE_INSERT.grid] } }) },
+  moves: { type: 'array', items: obj({ ref: REF, position: POSITION, target: REF }) },
+  deletes: { type: 'array', items: REF },
+  summary: strs(0, 40),
+  skipped: strs(0, 20),
+});
