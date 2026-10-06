@@ -666,6 +666,9 @@ details.card[open] > summary .fx-chevron { transform: rotate(180deg); }
 .vp-btn.primary { background: var(--fx-blue); border-color: var(--fx-blue); color: #fff; }
 .vp-btn.primary:hover { background: var(--fx-blue-hover); }
 .vp-btn.small { width: auto; padding: 5px 10px; font-size: 0.82rem; }
+/* 들어 있는 GIF 지우기 — 빨간 글자·테두리(되돌리기로 살릴 수 있다) */
+.vp-btn.danger { color: var(--fx-error); border-color: var(--fx-error); }
+.vp-btn.danger:hover { background: var(--fx-error-bg); border-color: var(--fx-error); }
 .vp-link {
   align-self: flex-start; background: none; border: 0; padding: 2px 0;
   font: inherit; font-size: 0.78rem; color: var(--fx-text-weak); text-decoration: underline; cursor: pointer;

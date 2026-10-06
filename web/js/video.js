@@ -126,6 +126,55 @@ export function createVideoPanel({ root, getDoc, getDraftId, commit, toast, onRe
       }, '닫기'));
   }
 
+  /** 그 자리에 지금 들어 있는 사진·GIF(없으면 null). */
+  function assetOf(nodeId) {
+    const doc = getDoc();
+    const p = pathOf(doc, nodeId);
+    return p ? getAt(doc, p)?.asset ?? null : null;
+  }
+
+  /**
+   * 이미 GIF 가 들어 있는 자리를 눌렀을 때 — [삭제]·[GIF 다운로드]. 다시 만들려면 삭제해서 회색 자리로 돌린다
+   * (그러면 같은 상자에 [레퍼런스 검색]·[영상으로 자동 생성]·[GIF 업로드]가 바로 뜬다).
+   */
+  function filledPanel(nodeId, asset) {
+    const gif = asset.mime === 'image/gif' || /\.gif$/i.test(asset.name ?? '');
+    return el('div', { class: 'vp', dataset: { vidPanel: '1' } },
+      el('button', {
+        type: 'button', class: 'vp-btn danger', dataset: { vid: '1' }, on: { click: () => removeAsset(nodeId) },
+      }, '삭제'),
+      el('button', {
+        type: 'button', class: 'vp-btn', dataset: { vid: '1' }, on: { click: () => downloadAsset(asset) },
+      }, gif ? 'GIF 다운로드' : '이미지 다운로드'),
+      el('div', { class: 'vp-note' }, '삭제하면 회색 자리로 돌아가 다시 만들 수 있습니다'),
+      el('button', {
+        type: 'button', class: 'vp-link', dataset: { vid: '1' }, on: { click: () => { menus.delete(nodeId); paint(); } },
+      }, '닫기'));
+  }
+
+  /** 들어 있는 GIF 를 지우고 회색 자리로 — 상자는 열어 둔 채라 곧바로 다시 만들 수 있다. 되돌리기로 살릴 수 있다. */
+  function removeAsset(nodeId) {
+    menus.add(nodeId);
+    commit((cur) => {
+      const path = pathOf(cur, nodeId);
+      if (!path) throw new Error('이 사진 자리가 문서에서 사라졌습니다.');
+      const { asset, ...rest } = getAt(cur, path);
+      return setAt(cur, path, rest);
+    });
+    paint();
+    toast('삭제했습니다 — 되돌리기로 살릴 수 있습니다');
+  }
+
+  /** 들어 있는 GIF(·사진)를 내 컴퓨터로 받는다 — 같은 출처라 a[download] 로 바로 저장된다. */
+  function downloadAsset(asset) {
+    const ext = { 'image/gif': 'gif', 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' }[asset.mime] ?? 'gif';
+    const base = String(asset.name ?? '').replace(/\.[a-z0-9]{2,5}$/i, '').replace(/[\\/:*?"<>|]+/g, '_').trim() || 'reference';
+    const a = el('a', { href: `/api/assets/${asset.id}`, download: `${base}.${ext}` });
+    document.body.append(a);
+    a.click();
+    a.remove();
+  }
+
   function foundPanel(job) {
     const seq = job.sequence;
     const top = topPick(job);
@@ -149,7 +198,12 @@ export function createVideoPanel({ root, getDoc, getDraftId, commit, toast, onRe
 
   function panelFor(nodeId) {
     const job = jobs.get(nodeId);
-    if (!job) return menus.has(nodeId) ? menuPanel(nodeId) : null;
+    if (!job) {
+      if (!menus.has(nodeId)) return null;
+      // 이미 GIF 가 들어 있으면 [삭제]·[다운로드], 회색 자리면 만들기 버튼들
+      const asset = assetOf(nodeId);
+      return asset ? filledPanel(nodeId, asset) : menuPanel(nodeId);
+    }
     if (job.phase === 'found') return foundPanel(job);
     if (job.phase === 'error') {
       return el('div', { class: 'vp', dataset: { vidPanel: '1' } },
