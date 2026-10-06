@@ -88,8 +88,11 @@ function singular(w) {
 /** 순서·단수복수만 다른 키워드를 같은 것으로 본다(기준 7). */
 const sameKey = (k) => k.split(' ').map(singular).sort().join(' ');
 
-/** 받은 키워드를 다듬는다 — 소문자·따옴표·해시 제거, 한글이 든 것·중복 빼기. 순서는 그대로. */
-export function cleanKeywords(list) {
+/**
+ * 받은 키워드를 다듬는다 — 소문자·따옴표·해시 제거, 중복 빼기. 순서는 그대로.
+ * 영어(기본)는 한글이 든 것을, 한국어([한국어로 생성])는 한글이 하나도 없는 것을 뺀다(기준 6).
+ */
+export function cleanKeywords(list, { lang = 'en' } = {}) {
   const seen = new Set();
   const out = [];
   for (const raw of list ?? []) {
@@ -102,7 +105,7 @@ export function cleanKeywords(list) {
       .replace(/[.,;:!?]+$/, '')
       .replace(/\s+/g, ' ')
       .trim();
-    if (!k || HANGUL.test(k)) continue;
+    if (!k || (lang === 'ko' ? !HANGUL.test(k) : HANGUL.test(k))) continue;
     const key = sameKey(k);
     if (seen.has(key)) continue;
     seen.add(key);
@@ -116,12 +119,16 @@ export function cleanKeywords(list) {
  * @param {object} o.doc        지금 문서(폼 입력이 반영된 것)
  * @param {string} o.stepId     스텝 id 또는 그 스텝의 참고 GIF 자리 id
  * @param {string[]} [o.previous]  [새로 고침] 직전 키워드
+ * @param {'en'|'ko'} [o.lang]      'ko' = [한국어로 생성] — 기준은 같고 언어(6번)만 한국어
  * @param {string} o.jobDir
  * @param {AbortSignal} [o.signal]
  * @param {typeof runClaude} [o.run]
- * @returns {Promise<{ keywords: string[], brand: string, product: string, title: string }>}
+ * @returns {Promise<{ keywords: string[], brand: string, product: string, title: string, lang: 'en'|'ko' }>}
  */
-export async function referenceKeywords({ doc, stepId, previous = [], jobDir, signal, run = runClaude }) {
+export async function referenceKeywords({
+  doc, stepId, previous = [], lang: want = 'en', jobDir, signal, run = runClaude,
+}) {
+  const lang = want === 'ko' ? 'ko' : 'en';
   const found = stepForSearch(doc, stepId);
   if (!found) throw new Error('이 스텝을 문서에서 찾지 못했습니다 — 화면을 새로고침해 주세요.');
   const { brand, product } = brandProduct(doc);
@@ -130,7 +137,9 @@ export async function referenceKeywords({ doc, stepId, previous = [], jobDir, si
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     const result = await run({
       system: referenceSystem(),
-      prompt: referenceUser({ brand, product, step: found.text, previous: cleanKeywords(previous), feedback }),
+      prompt: referenceUser({
+        brand, product, step: found.text, previous: cleanKeywords(previous, { lang }), feedback, lang,
+      }),
       schema: REFERENCE,
       model: config.models.reference,
       workDir: path.join(jobDir, `ref-${attempt}`),
@@ -139,12 +148,15 @@ export async function referenceKeywords({ doc, stepId, previous = [], jobDir, si
     });
     const raw = result.structured ?? extractJsonObject(result.text, ['keywords']);
     const errs = raw ? validate(REFERENCE, raw) : ['JSON 을 찾지 못했습니다'];
-    const keywords = cleanKeywords(raw?.keywords);
+    const keywords = cleanKeywords(raw?.keywords, { lang });
     if (keywords.length > best.length) best = keywords;
-    // 중복·한글을 빼고 3개 넘게 모자라면 한 번 더 받는다. 두 번째도 모자라면 있는 만큼 보여 준다.
+    // 중복·다른 언어를 빼고 3개 넘게 모자라면 한 번 더 받는다. 두 번째도 모자라면 있는 만큼 보여 준다.
     if (!errs.length && keywords.length >= REFERENCE_COUNT - 3) break;
-    feedback = `키워드 ${REFERENCE_COUNT}개를 서로 다르게, 영어 소문자로만 다시 주세요.${errs.length ? ` (${errs.slice(0, 3).join('; ')})` : ''}`;
+    const how = lang === 'ko' ? '한국어로' : '영어 소문자로만';
+    feedback = `키워드 ${REFERENCE_COUNT}개를 서로 다르게, ${how} 다시 주세요.${errs.length ? ` (${errs.slice(0, 3).join('; ')})` : ''}`;
   }
   if (!best.length) throw new ClaudeError('bad_output', '검색어를 받지 못했습니다. [새로 고침]을 눌러 다시 시도해 주세요.');
-  return { keywords: best, brand, product, title: found.title };
+  return {
+    keywords: best, brand, product, title: found.title, lang,
+  };
 }

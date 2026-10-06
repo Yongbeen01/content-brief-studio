@@ -5,7 +5,7 @@ import { extractJsonObject } from '../claude/json.js';
 import { EDIT, INSERT, fixEscapes, validate } from './schema.js';
 import { ENGLISH_DOC_NOTE, editSystem, editUser, insertUser } from './prompts.js';
 import {
-  docLang, docToMarkdown, getAt, insertAt, setAt, stepTimeline, stepTitle, withIds, wordTableTitle,
+  docLang, docToMarkdown, getAt, gridItemText, insertAt, setAt, stepTimeline, stepTitle, withIds, wordTableTitle,
 } from '../../web/js/doc.js';
 
 /**
@@ -87,9 +87,14 @@ export function resolveTarget(doc, p) {
       return { kind: 'list', current: { items: value }, where, apply: (d, v) => setAt(d, p, v.items) };
     }
   }
-  // 그리드 항목 하나
+  // 그리드 항목 하나 — 항목이 들고 있는 예시 사진(번호 아래)은 그대로 둔다
   if (p[p.length - 2] === 'items' && getAt(doc, p.slice(0, -2))?.type === 'grid') {
-    return { kind: 'gridItem', current: value, where, apply: (d, v) => setAt(d, p, { title: v.title, desc: v.desc }) };
+    return {
+      kind: 'gridItem',
+      current: gridItemText(value, docLang(doc)),
+      where,
+      apply: (d, v) => setAt(d, p, { title: v.title, desc: v.desc, ...(value.image ? { image: value.image } : {}) }),
+    };
   }
   // 표 한 줄
   if (p[p.length - 2] === 'rows' && getAt(doc, p.slice(0, -2))?.type === 'table') {

@@ -44,7 +44,7 @@ export function withIds(node) {
     n.image = n.image?.type === 'image' ? { ...n.image, id: n.image.id || uid() } : stepImage();
     if (n.extra) n.extra = n.extra.map(withIds);
   }
-  if (n.type === 'grid') n.images = syncGridImages(n);
+  if (n.type === 'grid') syncGrid(n);
   return n;
 }
 
@@ -52,16 +52,61 @@ export function stepImage() {
   return { type: 'image', id: uid(), slot: 'step', label: '참고 GIF', ratio: 1.78 };
 }
 
-export function gridImage(kind, optional = false) {
-  return { type: 'image', id: uid(), slot: kind === 'dont' ? 'dont' : 'do', label: '예시 이미지', ratio: 0.46, ...(optional ? { optional: true } : {}) };
+/** 항목마다 사진(번호 아래 하나)일 때의 비율 — 한 칸 폭이라 정사각형. 한 줄에 하나일 때는 두 칸 폭이라 납작하다. */
+export const ITEM_IMAGE_RATIO = 1;
+
+export function gridImage(kind, optional = false, ratio = 0.46) {
+  return { type: 'image', id: uid(), slot: kind === 'dont' ? 'dont' : 'do', label: '예시 이미지', ratio, ...(optional ? { optional: true } : {}) };
 }
 
-/** 그리드 사진 자리는 두 항목(한 줄)마다 하나. 항목 수가 바뀌면 자리 수를 맞춘다(있던 사진은 앞에서부터 유지). */
-export function syncGridImages(grid) {
+/**
+ * Do's/Don'ts 사진 자리를 항목 수에 맞춘다(그 자리에서 고친다).
+ * - perItem(새로 만든 기획서): 항목마다 하나, **번호 아래**에. 사진은 항목(item.image)이 들고 있어 항목을 넣고 빼도 같이 움직인다.
+ * - 아니면(불러온 브리프 — 노션 원본 모양): 두 항목(한 줄)마다 하나, grid.images. 있던 사진은 앞에서부터 유지.
+ */
+export function syncGrid(grid) {
+  if (grid.perItem) {
+    grid.items = (grid.items ?? []).map((it) => ({
+      ...it,
+      image: it.image?.type === 'image' ? { ...it.image, id: it.image.id || uid() } : gridImage(grid.kind, false, ITEM_IMAGE_RATIO),
+    }));
+    delete grid.images;
+    return grid;
+  }
   const need = Math.ceil((grid.items ?? []).length / 2);
   const have = (grid.images ?? []).map((im) => ({ ...im, id: im.id || uid() }));
   while (have.length < need) have.push(gridImage(grid.kind, !!grid.optionalImages));
-  return have.slice(0, need);
+  grid.images = have.slice(0, need);
+  return grid;
+}
+
+/**
+ * 예전에 만든 기획서(두 항목마다 사진 하나)를 항목마다 사진 하나로 바꾼다 — 열 때 한 번. 불러온 브리프는 그대로(노션 원본 모양).
+ * 그 줄에 넣어 둔 사진은 그 줄 첫 항목으로 간다. 바꿀 것이 없으면 같은 문서를 돌려준다.
+ */
+export function upgradeGrids(doc) {
+  if (!doc || doc.origin === 'import') return doc;
+  const next = clone(doc);
+  let changed = false;
+  const walk = (nodes) => {
+    for (const n of nodes ?? []) {
+      if (n.type === 'grid' && !n.perItem) {
+        const rows = n.images ?? [];
+        n.items = (n.items ?? []).map((it, j) => {
+          const old = j % 2 === 0 ? rows[j / 2] : null;
+          return { ...it, image: { ...gridImage(n.kind, false, ITEM_IMAGE_RATIO), ...(old?.asset ? { asset: old.asset } : {}) } };
+        });
+        n.perItem = true;
+        delete n.images;
+        delete n.optionalImages;
+        delete n.imagesFirst;
+        changed = true;
+      }
+      for (const [, list] of childLists(n)) walk(list);
+    }
+  };
+  walk(next.nodes);
+  return changed ? next : doc;
 }
 
 // ── 고정 문구 ───────────────────────────────────────────────────────────────
@@ -137,7 +182,7 @@ export function removeAt(root, path) {
 export function fixup(doc) {
   const walk = (nodes) => {
     for (const n of nodes ?? []) {
-      if (n.type === 'grid') n.images = syncGridImages(n);
+      if (n.type === 'grid') syncGrid(n);
       if ((n.type === 'bulleted' || n.type === 'numbered') && n.levels && n.levels.length !== n.items?.length) delete n.levels;
       for (const [, list] of childLists(n)) walk(list);
     }
@@ -259,10 +304,17 @@ export function imageSlots(doc) {
         walk(n.extra, [...p, 'extra']);
       }
       if (n.type === 'grid') {
+        const kind = n.kind === 'dont' ? "Don'ts" : "Do's";
+        // 항목마다 하나(번호 아래)면 항목이, 한 줄에 하나면 그리드가 들고 있다(syncGrid)
+        if (n.perItem) {
+          (n.items ?? []).forEach((it, j) => {
+            if (it.image) out.push({ path: [...p, 'items', j, 'image'], node: it.image, label: `${kind} ${j + 1} 예시 이미지` });
+          });
+        }
         (n.images ?? []).forEach((im, j) => out.push({
           path: [...p, 'images', j],
           node: im,
-          label: `${n.kind === 'dont' ? "Don'ts" : "Do's"} ${j * 2 + 1}–${Math.min(j * 2 + 2, n.items.length)} 예시 이미지`,
+          label: `${kind} ${j * 2 + 1}–${Math.min(j * 2 + 2, n.items.length)} 예시 이미지`,
         }));
       }
       if (n.type === 'callout') walk(n.children, [...p, 'children']);
@@ -339,7 +391,13 @@ export function slotScene(doc, path, lang = docLang(doc)) {
     return '';
   };
 
-  // Do's/Don'ts 예시 이미지 — 그 줄의 항목
+  // Do's/Don'ts 예시 이미지 — 항목마다 하나면 그 항목, 한 줄에 하나면 그 줄의 두 항목
+  if (last === 'image' && path[path.length - 3] === 'items') {
+    const grid = at(path.slice(0, -3));
+    if (grid?.type !== 'grid') return null;
+    const { title, desc } = gridItemText(parentOf(path), lang);
+    return { kind: 'text', title: grid.kind === 'dont' ? "Don'ts" : "Do's", lines: [desc ? `${title} — ${desc}` : title], index };
+  }
   if (path[path.length - 2] === 'images') {
     const grid = at(path.slice(0, -2));
     if (grid?.type !== 'grid') return null;
@@ -491,6 +549,8 @@ export function docToMarkdown(doc, lang = 'ko') {
           for (const it of row) {
             const { title, desc } = gridItemText(it, lang);
             lines.push(q(`### ${it.n}. ${title}`), ...(desc ? [q(desc)] : []), quote ? quote.trimEnd() : '');
+            // 항목마다 사진이면 그 항목 아래
+            if (it.image && (it.image.asset || !it.image.optional)) lines.push(q(img(`예시 이미지 ${it.n}`)), quote ? quote.trimEnd() : '');
           }
           if (!n.imagesFirst) lines.push(...pic);
         });

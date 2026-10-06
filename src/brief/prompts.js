@@ -319,18 +319,29 @@ export const REFERENCE_PROMPT = `틱톡에서 레퍼런스 영상을 찾을 검�
 
 출력: keywords 배열에 키워드 문자열 15개만 담고, 설명은 쓰지 않습니다.`;
 
+/**
+ * [한국어로 생성] — 기준은 모두 같고 언어를 정하는 6번만 바꾼다. 문안 원문(REFERENCE_PROMPT)은 그대로 둔다.
+ * 브랜드명은 1번 기준대로 틱톡에서 쓰는 영문 표기를 그대로 넣어도 된다.
+ */
+export const REFERENCE_RULE_EN = '6. 틱톡 사용자가 실제로 검색할 만한 2~5단어의 영어 소문자로 씁니다. 반드시 영어로만 생성하고, 한글로 생성하지 않습니다.';
+export const REFERENCE_RULE_KO = '6. 틱톡 사용자가 실제로 검색할 만한 2~5단어의 한국어로 씁니다. 반드시 한국어로 생성하고, 영어로만 된 키워드는 만들지 않습니다(브랜드명은 1번처럼 영문 표기 그대로 넣어도 됩니다).';
+
 export function referenceSystem() {
   return 'You help a Korean brand team find reference videos on TikTok. '
     + 'Follow the criteria in the request exactly and return only the JSON object in the provided schema.';
 }
 
 /**
- * @param {{ brand:string, product:string, step:string, previous?:string[], feedback?:string }} o
+ * @param {{ brand:string, product:string, step:string, previous?:string[], feedback?:string, lang?:'en'|'ko' }} o
  *   previous = [새로 고침] 직전에 보여 준 키워드. 기준은 그대로 두고 표현만 새로 뽑게 한다.
+ *   lang = 'ko' 면 [한국어로 생성] — 기준 6번(언어)만 한국어로 바꾼다.
  */
-export function referenceUser({ brand, product, step, previous = [], feedback = '' }) {
+export function referenceUser({
+  brand, product, step, previous = [], feedback = '', lang = 'en',
+}) {
   const fill = { brand: brand || '(브랜드 모름)', product: product || '(제품명 모름)', step };
-  const body = REFERENCE_PROMPT.replace(/\{\{(\w+)\}\}/g, (m, k) => fill[k] ?? m);
+  const prompt = lang === 'ko' ? REFERENCE_PROMPT.replace(REFERENCE_RULE_EN, REFERENCE_RULE_KO) : REFERENCE_PROMPT;
+  const body = prompt.replace(/\{\{(\w+)\}\}/g, (m, k) => fill[k] ?? m);
   const again = previous.length
     ? `\n\n[새로 고침] 직전에 보여 준 키워드입니다. 위 기준은 그대로 지키되, 되도록 이 키워드들과 겹치지 않는 새 키워드로 만들어 주세요.\n${previous.map((k) => `- ${k}`).join('\n')}`
     : '';

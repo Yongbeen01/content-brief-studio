@@ -402,13 +402,13 @@ async function handleApi(req, res, url) {
     }));
     return json(res, 200, { jobId: job.id });
   }
-  // 레퍼런스 검색 — 스텝 하나로 틱톡 검색 키워드 15개. previous 가 있으면 [새로 고침].
+  // 레퍼런스 검색 — 스텝 하나로 틱톡 검색 키워드 15개. previous 가 있으면 [새로 고침], lang 'ko' 면 [한국어로 생성].
   if (m === 'POST' && p === '/api/reference-keywords') {
     const body = await readJson(req, 16 * 1024 * 1024);
     const job = startJob('reference', ({ progress, signal, dir }) => {
       progress({ phase: 'reference', detail: 'Claude 가 검색어를 만드는 중' });
       return referenceKeywords({
-        doc: body.doc, stepId: body.stepId, previous: Array.isArray(body.previous) ? body.previous : [], jobDir: dir, signal,
+        doc: body.doc, stepId: body.stepId, previous: Array.isArray(body.previous) ? body.previous : [], lang: body.lang, jobDir: dir, signal,
       });
     });
     return json(res, 200, { jobId: job.id });

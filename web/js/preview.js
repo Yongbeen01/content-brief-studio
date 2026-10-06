@@ -236,9 +236,13 @@ function renderNode(doc, n, path, ctx) {
         if (pic && n.imagesFirst) wrap.append(pic);
         wrap.append(el('div', { class: 'n-cols' }, row.map((it) => {
           const { title, desc } = gridItemText(it, lang);
-          return el('div', { class: 'n-col', dataset: { path: P([...iPath, it.index]) } },
-            el('div', { class: 'n-h n-h3' }, rich(`${it.n}. ${title}`)),
-            desc ? el('div', { class: 'n-p' }, rich(desc)) : null);
+          const text = [el('div', { class: 'n-h n-h3' }, rich(`${it.n}. ${title}`)), desc ? el('div', { class: 'n-p' }, rich(desc)) : null];
+          // 새로 만든 기획서는 항목마다 사진 하나, 번호 아래에(perItem). 글과 사진을 따로 누른다.
+          if (!it.image) return el('div', { class: 'n-col', dataset: { path: P([...iPath, it.index]) } }, ...text);
+          return el('div', { class: 'n-col' },
+            el('div', { dataset: { path: P([...iPath, it.index]) } }, ...text),
+            slot({ ...it.image, displayLabel: `${n.kind === 'dont' ? "Don'ts" : "Do's"} ${it.n} 예시 이미지` }, [...iPath, it.index, 'image'],
+              '', { video: isVideoSlot(doc, it.image) }));
         }),
         row.length === 1 ? el('div', { class: 'n-col' }) : null));
         if (pic && !n.imagesFirst) wrap.append(pic);

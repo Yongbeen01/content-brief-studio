@@ -611,6 +611,11 @@ details.card[open] > summary .fx-chevron { transform: rotate(180deg); }
 .fx-modal.ref-dialog { max-width: 920px; }
 .ref-cols { display: grid; grid-template-columns: minmax(0, 280px) minmax(0, 1fr); gap: 12px; align-items: start; }
 .ref-left { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+/* 목록 오른쪽 위 — 맨 윗줄이라 오른쪽 스텝 카드와 윗선이 맞는다 */
+.ref-tools { display: flex; justify-content: flex-end; gap: 6px; }
+.ref-tool { background: var(--fx-card); padding: 5px 10px; font-size: 0.82rem; gap: 6px; }
+.ref-tool:hover:not(:disabled) { background: var(--fx-blue-weakest); color: var(--fx-blue); }
+.ref-tool .loader { width: 12px; height: 12px; }
 .ref-step { position: sticky; top: 0; min-width: 0; background: #fff; border-radius: var(--fx-r-sm); padding: 14px 18px; }
 .ref-step:empty { display: none; }
 .ref-step .notion-doc { max-width: none; font-size: 14px; }
@@ -634,8 +639,12 @@ details.card[open] > summary .fx-chevron { transform: rotate(180deg); }
 
 /* ── 회색 상자 안에서 영상 → GIF ─────────────────────────── */
 .slot-video-btn { display: none; }        /* 창에 있던 버튼 — 이제 상자 안에 있다 */
-.n-slot.has-panel {
-  aspect-ratio: auto !important;
+/* 버튼들은 상자 크기(회색 자리 비율·넣은 GIF 크기)를 그대로 두고 **그 가운데**에 뜬다 — 예전엔 상자가 버튼 높이로
+   줄어 섹션 위쪽에 붙어 보였다. 원래 내용은 자리만 차지하게 숨기고 패널과 같은 칸에 겹쳐 둔다.
+   (preview.css 의 .n-slot.has-image 가 뒤에 읽혀 바탕·여백을 덮지 않게 .notion-doc 를 붙여 이긴다) */
+.notion-doc .n-slot.has-panel {
+  display: grid;
+  place-items: center;
   padding: 10px;
   background: var(--fx-blue-weakest);
   color: var(--fx-text);
@@ -644,7 +653,8 @@ details.card[open] > summary .fx-chevron { transform: rotate(180deg); }
 }
 .n-slot.has-panel:hover { outline: none; }
 /* 패널은 상자 내용을 덮기만 한다 — 패널이 빠지면 원래 모습(넣은 GIF)이 돌아온다. */
-.n-slot.has-panel > :not([data-vid-panel]) { display: none; }
+.n-slot.has-panel > * { grid-area: 1 / 1; }
+.n-slot.has-panel > :not([data-vid-panel]) { visibility: hidden; }
 .vp { display: flex; flex-direction: column; gap: 6px; width: 100%; }
 .vp-head { font-size: 0.82rem; font-weight: 600; color: var(--fx-text-weak); }
 .vp-btn {

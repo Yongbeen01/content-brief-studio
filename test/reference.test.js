@@ -7,7 +7,9 @@ import { buildDoc } from '../src/brief/build.js';
 import {
   brandProduct, cleanKeywords, referenceKeywords, stepForSearch,
 } from '../src/brief/reference.js';
-import { REFERENCE_PROMPT, referenceUser } from '../src/brief/prompts.js';
+import {
+  REFERENCE_PROMPT, REFERENCE_RULE_EN, REFERENCE_RULE_KO, referenceUser,
+} from '../src/brief/prompts.js';
 import { REFERENCE, validate } from '../src/brief/schema.js';
 
 const sample = JSON.parse(fs.readFileSync(new URL('./fixtures/compose-sample.json', import.meta.url), 'utf8'));
@@ -101,4 +103,37 @@ test('검색어 받기 — 스키마로 15개, 모자라면 한 번 더, 새로 
 
   await assert.rejects(referenceKeywords({ doc, stepId: 'nope', jobDir: tmp(), run }), /찾지 못했습니다/);
   await assert.rejects(referenceKeywords({ doc, stepId: steps[0].id, jobDir: tmp(), run: async () => ({ structured: null, text: 'no' }) }), /받지 못했습니다/);
+});
+
+test('[한국어로 생성] — 기준은 같고 6번(언어)만 한국어로, 한글이 없는 키워드는 뺀다', async () => {
+  const en = referenceUser({ brand: 'LUMIA', product: 'P', step: 's' });
+  const ko = referenceUser({
+    brand: 'LUMIA', product: 'P', step: 's', lang: 'ko',
+  });
+  assert.ok(en.includes(REFERENCE_RULE_EN) && !en.includes(REFERENCE_RULE_KO));
+  assert.ok(ko.includes(REFERENCE_RULE_KO) && !ko.includes(REFERENCE_RULE_EN));
+  // 6번 줄 말고는 글자 하나 다르지 않다
+  assert.equal(ko.replace(REFERENCE_RULE_KO, REFERENCE_RULE_EN), en);
+
+  assert.deepEqual(cleanKeywords(['루미아 세럼 바르기', 'lumia serum', 'LUMIA 세럼 텍스처', '#루미아 루틴.', '루미아 세럼 바르기'], { lang: 'ko' }),
+    ['루미아 세럼 바르기', 'lumia 세럼 텍스처', '루미아 루틴']);
+
+  const calls = [];
+  const ko15 = Array.from({ length: 15 }, (_, i) => `루미아 세럼 ${i + 1}번`);
+  const r = await referenceKeywords({
+    doc, stepId: steps[0].id, jobDir: tmp(), lang: 'ko', previous: ['예전 키워드'], run: async (o) => { calls.push(o); return { structured: { keywords: ko15 } }; },
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(r.lang, 'ko');
+  assert.deepEqual(r.keywords, ko15);
+  assert.ok(calls[0].prompt.includes(REFERENCE_RULE_KO));
+  assert.match(calls[0].prompt, /- 예전 키워드/);
+
+  // 영어로만 답이 오면 한국어 기준으로 다시 묻는다
+  const again = [];
+  await referenceKeywords({
+    doc, stepId: steps[0].id, jobDir: tmp(), lang: 'ko', run: async (o) => { again.push(o); return { structured: { keywords: again.length === 1 ? words(15) : ko15 } }; },
+  });
+  assert.equal(again.length, 2);
+  assert.match(again[1].prompt, /고칠 점: 키워드 15개를 서로 다르게, 한국어로 다시 주세요/);
 });

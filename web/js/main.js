@@ -1,7 +1,7 @@
 import { api, initSession, pollJob, sleep, uploadAsset } from './api.js';
 import { createInline } from './inline.js';
 import {
-  clone, docLang, docToMarkdown, fillAssets, getAt, imageSlots, keepAssets, setAt, slotScene, stepTimeline, stepTitle, uid,
+  clone, docLang, docToMarkdown, fillAssets, getAt, imageSlots, keepAssets, setAt, slotScene, stepTimeline, stepTitle, uid, upgradeGrids,
 } from './doc.js';
 import { translateFromCache } from './translatable.js';
 import { lintDoc } from './lint.js';
@@ -1754,11 +1754,30 @@ async function deleteArchive(it) {
 
 // ── 레퍼런스 검색 ───────────────────────────────────────────────────────────
 
-/** 스텝 id → { key, keywords } — 같은 스텝을 다시 열면 기다림 없이 보여 준다. 스텝 글이 바뀌면 새로 받는다. */
+/** 「스텝 id|언어」 → { key, keywords } — 같은 스텝을 다시 열면 기다림 없이 보여 준다. 스텝 글이 바뀌면 새로 받는다. */
 const refCache = new Map();
-/** 스텝 id → { key, promise } — 창을 닫았다 열어도 같은 요청을 두 번 보내지 않게. */
+/** 「스텝 id|언어」 → { key, promise } — 창을 닫았다 열어도 같은 요청을 두 번 보내지 않게. */
 const refJobs = new Map();
+/** 지금 창 — { stepId, key, slotId, step, lang('en'|'ko') }. 언어를 바꾸면 새 객체로 바꿔 끼운다(늦게 온 다른 언어 답을 버리게). */
 let refTarget = null;
+const refSlot = (t) => `${t.stepId}|${t.lang}`;
+
+/**
+ * 목록 오른쪽 위 버튼 — [한국어로 생성] ↔ [영어로 생성]은 지금 보이는 언어의 반대, [새로 고침]은 지금 언어로 다시.
+ * busy = 'lang' | 'refresh' 면 그 버튼에 도는 표시를 달고 둘 다 잠근다.
+ */
+function paintRefTools(busy = null) {
+  const t = refTarget;
+  const ko = t?.lang === 'ko';
+  const langBtn = $('ref_lang');
+  // 만드는 동안은 만들고 있는 언어를, 아니면 누르면 바뀔 언어를 보여 준다.
+  langBtn.querySelector('.btn-text').textContent = busy === 'lang' ? (ko ? '한국어로 생성' : '영어로 생성') : (ko ? '영어로 생성' : '한국어로 생성');
+  langBtn.title = ko ? '같은 기준으로 영어 검색어를 다시 만듭니다' : '같은 기준으로 한국어 검색어를 다시 만듭니다';
+  for (const [btn, name] of [[langBtn, 'lang'], [$('ref_refresh'), 'refresh']]) {
+    btn.disabled = !t || !!busy;
+    btn.classList.toggle('is-loading', busy === name);
+  }
+}
 
 /** 스텝 글·브랜드·제품이 같으면 같은 키(사진·id 는 빼고 본다 — GIF 를 넣었다고 새로 받을 필요는 없다). */
 function refKey(doc, step) {
@@ -1811,50 +1830,65 @@ async function openRefSearch(e, url) {
   if (!r?.ok) window.open(url, '_blank', 'noopener');
 }
 
-function fetchKeywords(doc, stepId, key, previous) {
+function fetchKeywords(doc, t, previous) {
+  const slot = refSlot(t);
+  const { stepId, key, lang } = t;
   const promise = (async () => {
-    const { jobId } = await api('POST', '/api/reference-keywords', { doc, stepId, previous });
+    const { jobId } = await api('POST', '/api/reference-keywords', {
+      doc, stepId, previous, lang,
+    });
     const job = await pollJob(jobId);
     if (job.status !== 'done') throw new Error(job.error?.message ?? '검색어를 만들지 못했습니다');
-    refCache.set(stepId, { key, keywords: job.result.keywords });
+    refCache.set(slot, { key, keywords: job.result.keywords });
     return job.result.keywords;
   })();
-  refJobs.set(stepId, { key, promise });
-  promise.catch(() => {}).finally(() => { if (refJobs.get(stepId)?.promise === promise) refJobs.delete(stepId); });
+  refJobs.set(slot, { key, promise });
+  promise.catch(() => {}).finally(() => { if (refJobs.get(slot)?.promise === promise) refJobs.delete(slot); });
   return promise;
 }
 
-/** 지금 창의 스텝 검색어를 받아 보여 준다. again = [새로 고침](같은 기준으로 다시). */
-async function loadReference(again = false) {
+/**
+ * 지금 창의 스텝 검색어를 지금 언어로 받아 보여 준다. 받아 둔 것이 있으면 기다림 없이.
+ * again = [새로 고침](같은 기준·같은 언어로 다시), busy = 도는 표시를 달 버튼('refresh' | 'lang').
+ */
+async function loadReference(again = false, busy = 'refresh') {
   const t = refTarget;
   if (!t) return;
-  const cached = refCache.get(t.stepId);
-  let job = refJobs.get(t.stepId);
+  const slot = refSlot(t);
+  const cached = refCache.get(slot);
+  const list = $('ref_list');
+  if (!again && cached?.key === t.key) {
+    renderRef(cached.keywords);
+    setStatus('ref_status', cached.keywords.length < 15 ? `겹치는 것을 빼고 ${cached.keywords.length}개입니다.` : '');
+    paintRefTools();
+    return;
+  }
+  let job = refJobs.get(slot);
   if (!job || job.key !== t.key || again) {
     const previous = again && cached?.key === t.key ? cached.keywords : [];
-    job = { promise: fetchKeywords(currentDoc(), t.stepId, t.key, previous) };
+    job = { promise: fetchKeywords(currentDoc(), t, previous) };
   }
-  const list = $('ref_list');
-  const btn = $('ref_refresh');
-  btn.disabled = true;
-  btn.classList.add('is-loading');
-  // 처음이면 목록 자리에 기다리는 줄, 새로 고침이면 지금 목록을 흐리게 두고 아래 줄에 알린다.
+  paintRefTools(busy);
+  // 새로 고침이면 지금 목록을 흐리게 두고 아래 줄에 알린다. 처음·언어 바꾸기는 목록 자리에 기다리는 줄.
+  const what = t.lang === 'ko' ? '한국어 검색어' : '검색어';
   let wait = null;
-  if (list.querySelector('a')) list.classList.add('is-loading');
+  if (again && list.querySelector('a')) list.classList.add('is-loading');
   else {
     const li = document.createElement('li');
     li.className = 'ref-wait';
     const spin = document.createElement('span');
     spin.className = 'inline-loader';
-    wait = document.createTextNode('Claude 가 검색어를 만드는 중…');
+    wait = document.createTextNode(`Claude 가 ${what}를 만드는 중…`);
     li.append(spin, wait);
+    list.classList.remove('is-loading');
     list.replaceChildren(li);
+    setStatus('ref_status', '');
   }
   const started = Date.now();
   const say = () => {
     if (refTarget !== t) return;
     const secs = Math.round((Date.now() - started) / 1000);
-    if (wait) wait.textContent = `Claude 가 검색어를 만드는 중…${secs ? ` ${secs}초` : ''}`;
+    if (wait) wait.textContent = `Claude 가 ${what}를 만드는 중…${secs ? ` ${secs}초` : ''}`;
     else setStatus('ref_status', `같은 기준으로 새로 만드는 중…${secs ? ` ${secs}초` : ''}`, 'busy');
   };
   say();
@@ -1873,11 +1907,16 @@ async function loadReference(again = false) {
     }
   } finally {
     clearInterval(tick);
-    if (refTarget === t) {
-      btn.disabled = false;
-      btn.classList.remove('is-loading');
-    }
+    if (refTarget === t) paintRefTools();
   }
+}
+
+/** [한국어로 생성] ↔ [영어로 생성] — 기준은 같고 키워드 언어만 바꾼다. 받아 둔 언어면 바로 보여 준다. */
+function toggleRefLang() {
+  const t = refTarget;
+  if (!t) return;
+  refTarget = { ...t, lang: t.lang === 'ko' ? 'en' : 'ko' };
+  loadReference(false, 'lang');
 }
 
 /**
@@ -1897,13 +1936,15 @@ function openReference(slotId) {
   let what;
   if (scene.kind === 'step') {
     const tl = stepTimeline(doc).steps.get(scene.step.id);
-    refTarget = { stepId: scene.step.id, key: refKey(doc, scene.step), slotId, step: tl?.index ?? stepNo };
+    refTarget = {
+      stepId: scene.step.id, key: refKey(doc, scene.step), slotId, step: tl?.index ?? stepNo, lang: 'en',
+    };
     what = `「${inline.plain(stepTitle(scene.step, tl, lang))}」 장면이 담긴 틱톡 영상을 찾는 검색어입니다.`;
     // 오른쪽 카드 — 그 스텝 글을 문서와 똑같이(검색어를 고르며 스텝을 다시 읽을 수 있게)
     $('ref_step').replaceChildren(renderStepCard(doc, scene.step, { lang }));
   } else {
     refTarget = {
-      stepId: slotId, key: docStamp({ scene, brand: doc.meta?.brand, product: doc.meta?.product }), slotId, step: stepNo,
+      stepId: slotId, key: docStamp({ scene, brand: doc.meta?.brand, product: doc.meta?.product }), slotId, step: stepNo, lang: 'en',
     };
     what = `${scene.title ? `「${inline.plain(scene.title)}」 의 ` : ''}사진 자리 — 오른쪽 글(이 사진 옆·아래 글)에 맞는 틱톡 영상을 찾는 검색어입니다.`;
     $('ref_step').replaceChildren(renderSceneCard(scene));
@@ -1913,12 +1954,9 @@ function openReference(slotId) {
     : `${what} 누르면 틱톡 검색이 새 탭으로 열립니다.`;
   $('ref_list').replaceChildren();
   setStatus('ref_status', '');
-  $('ref_refresh').disabled = false;
-  $('ref_refresh').classList.remove('is-loading');
+  paintRefTools();
   openDialog('ref_dialog');
-  const hit = refCache.get(refTarget.stepId);
-  if (hit && hit.key === refTarget.key) return renderRef(hit.keywords);
-  loadReference(false);
+  loadReference(false); // 받아 둔 영어 검색어가 있으면 기다림 없이
 }
 
 // ── 시작 ────────────────────────────────────────────────────────────────────
@@ -1927,6 +1965,14 @@ function openReference(slotId) {
 async function useDraft(draft) {
   editor?.close();
   state.draft = draft;
+  // 예전에 만든 기획서의 Do's/Don'ts 예시 사진(두 항목마다 하나)을 항목마다 하나로 — 열 때 한 번(불러온 브리프는 그대로)
+  const upgraded = upgradeGrids(state.draft.doc);
+  if (upgraded !== state.draft.doc) {
+    state.draft.doc = upgraded;
+    state.draft.docEn = null; // 영어본도 사진 자리가 바뀌었다 — 옮긴 줄 캐시로 다시 만든다
+    state.draft.docEnFrom = '';
+    scheduleSave();
+  }
   state.draft.mode ??= 'new';
   state.draft.sourceIds ??= [];
   state.draft.importSource ??= null;
@@ -2004,6 +2050,7 @@ function wire() {
   archive.addEventListener('keydown', (e) => { if (e.key === 'Escape') archive.open = false; });
 
   $('ref_refresh').addEventListener('click', () => loadReference(true));
+  $('ref_lang').addEventListener('click', toggleRefLang);
   $('generate_btn').addEventListener('click', () => (isImport() ? runImport() : generate()));
   // 전체 수정 — Ctrl+Enter 로도 적용, 도는 중이면 [멈추기]
   $('revise_btn').addEventListener('click', runRevise);

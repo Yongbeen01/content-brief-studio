@@ -198,7 +198,7 @@ export function buildDoc(c, inputs, ctx = {}) {
     items: items.map((d) => (d.chrome
       ? { chrome: d.chrome, title: d.title, desc: d.desc }
       : { title: kind === 'dont' ? normalizeDontTitle(d.title) : stripNumbering(d.title), desc: String(d.desc ?? '').trim() })),
-    images: [],
+    perItem: true, // 예시 사진은 항목마다 하나, 번호 아래에(withIds → syncGrid 가 자리를 만든다)
   });
   nodes.push(C('', 'teal_background', [Hc(3, 'dosTitle'), grid('do', c.dos)], { role: 'dos' }));
   nodes.push(C('', 'red_background', [Hc(3, 'dontsTitle'), grid('dont', dontItems)], { role: 'donts' }));

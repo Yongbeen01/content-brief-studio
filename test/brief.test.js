@@ -8,7 +8,7 @@ import { COMPOSE, EDIT, validate } from '../src/brief/schema.js';
 import { lintDoc, parseLengthRange } from '../web/js/lint.js';
 import {
   docToMarkdown, getAt, gridItemText, imageSlots, insertAt, nodeText, removeAt, stepTimeline, stepTitle,
-  durationText, tableRows, wordTableTitle,
+  durationText, syncGrid, tableRows, upgradeGrids, wordTableTitle,
 } from '../web/js/doc.js';
 import { chromeText } from '../web/js/chrome.js';
 import { collectTranslatable, applyTranslations, translateDoc } from '../src/brief/translate.js';
@@ -71,7 +71,10 @@ test('조립: 고정 틀·브랜드 해시태그·필수 Don\'t·HOOK·번호 �
   assert.equal(donts.items.length, 4); // haul·horizontal 이 표준 문구로 채워졌다
   assert.equal(donts.items[2].chrome, 'dontHaul');
   assert.equal(gridItemText(donts.items[2], 'en').title, 'DO NOT post a PR haul');
-  assert.equal(donts.images.length, 2);
+  // 예시 사진은 항목마다 하나(번호 아래) — 한 칸 폭이라 정사각형
+  assert.equal(donts.perItem, true);
+  assert.equal(donts.images, undefined);
+  assert.ok(donts.items.every((it) => it.image?.type === 'image' && it.image.slot === 'dont' && it.image.ratio === 1 && it.image.id));
   const dos = doc.nodes.find((n) => n.role === 'dos').children[1];
   assert.equal(dos.items[0].title, '텍스처가 잘 보이게 찍으세요');
   assert.ok(notes.some((n) => /#lumia/.test(n)));
@@ -127,22 +130,52 @@ test('검사: 깨끗한 문서 · 필수 Don\'t 삭제 · 계정 불일치 · �
   assert.equal(parseLengthRange('Vertical, 9:16'), null);
 });
 
-test('추가·삭제 뒤 그리드 사진 자리 수가 맞춰진다', () => {
+test('추가·삭제 뒤 그리드 사진 자리가 맞춰진다 — 항목마다 하나, 사진은 항목을 따라간다', () => {
   const doc = build();
   const dosIdx = doc.nodes.findIndex((n) => n.role === 'dos');
   const gridPath = ['nodes', dosIdx, 'children', 1];
-  const more = insertAt(doc, [...gridPath, 'items'], 4, [{ title: 'New', desc: 'x' }]);
-  assert.equal(getAt(more, gridPath).images.length, 3);
-  const fewer = removeAt(more, [...gridPath, 'items', 4]);
-  assert.equal(getAt(fewer, gridPath).images.length, 2);
-  assert.equal(getAt(doc, gridPath).images.length, 2); // 원본은 그대로
+  const first = getAt(doc, gridPath).items[0].image.id;
+  // 맨 앞에 항목을 넣어도 원래 1번의 사진은 원래 항목(이제 2번)에 붙어 있다
+  const more = insertAt(doc, [...gridPath, 'items'], 0, [{ title: 'New', desc: 'x' }]);
+  const g = getAt(more, gridPath);
+  assert.equal(g.items.length, 5);
+  assert.ok(g.items.every((it) => it.image?.id));
+  assert.equal(g.items[1].image.id, first);
+  assert.notEqual(g.items[0].image.id, first);
+  const fewer = removeAt(more, [...gridPath, 'items', 0]);
+  assert.equal(getAt(fewer, gridPath).items[0].image.id, first);
+  assert.equal(getAt(doc, gridPath).items.length, 4); // 원본은 그대로
+
+  // 불러온 브리프(노션 원본 모양)는 예전처럼 두 항목(한 줄)마다 하나
+  const rowGrid = { type: 'grid', kind: 'do', items: [{ title: 'a', desc: '' }, { title: 'b', desc: '' }, { title: 'c', desc: '' }] };
+  syncGrid(rowGrid);
+  assert.equal(rowGrid.images.length, 2);
+  assert.ok(rowGrid.items.every((it) => !it.image));
+});
+
+test('예전에 만든 기획서는 열 때 항목마다 사진으로 — 넣어 둔 사진은 그 줄 첫 항목에, 불러온 브리프는 그대로', () => {
+  const doc = build();
+  const old = structuredClone(doc);
+  const grid = old.nodes.find((n) => n.role === 'dos').children[1];
+  delete grid.perItem;
+  grid.items = grid.items.map(({ image, ...it }) => it);
+  grid.images = [{ type: 'image', id: 'r0', slot: 'do', ratio: 0.46, asset: { id: 'A0' } }, { type: 'image', id: 'r1', slot: 'do', ratio: 0.46 }];
+  const up = upgradeGrids(old);
+  const g = up.nodes.find((n) => n.role === 'dos').children[1];
+  assert.equal(g.perItem, true);
+  assert.equal(g.images, undefined);
+  assert.deepEqual(g.items.map((it) => it.image.asset?.id ?? null), ['A0', null, null, null]);
+  assert.equal(upgradeGrids(doc), doc); // 이미 새 모양이면 그대로
+  const imported = { ...old, origin: 'import' };
+  assert.equal(upgradeGrids(imported), imported);
 });
 
 test('사진 자리 목록과 마크다운 내보내기', () => {
   const doc = build();
   const slots = imageSlots(doc);
-  // 제품 1 + 스텝 4 + Do's 2 + Don'ts 2
-  assert.equal(slots.length, 9);
+  // 제품 1 + 스텝 4 + Do's 4 + Don'ts 4 (예시 사진은 항목마다)
+  assert.equal(slots.length, 13);
+  assert.ok(slots.some((s) => s.label === "Do's 2 예시 이미지" && s.path[s.path.length - 1] === 'image'));
   assert.ok(slots.some((s) => s.label === 'Step 2 참고 GIF'));
   const md = docToMarkdown(doc);
   assert.match(md, /### \*\*Step 1 \(HOOK\): 스포이드 한 방울\*\*/);
@@ -302,7 +335,14 @@ test('직접 쓰기 — 블록 사이·박스 안·Do 목록에 바로 넣는다
   const grid = directInsert(doc, ['nodes', dos, 'children', 1, 'items'], 0);
   assert.deepEqual(grid.fields.map((f) => f.label), ['제목', '설명 한 줄']);
   const added = getAt(grid.apply(doc, ['제품을 크게', '얼굴보다 제품이 크게 보이게.']), ['nodes', dos, 'children', 1, 'items', 0]);
-  assert.deepEqual(added, { title: '제품을 크게', desc: '얼굴보다 제품이 크게 보이게.' });
+  assert.deepEqual([added.title, added.desc], ['제품을 크게', '얼굴보다 제품이 크게 보이게.']);
+  assert.equal(added.image?.type, 'image'); // 새 항목에도 번호 아래 사진 자리
+  // 항목 글을 직접 고쳐도 넣어 둔 사진은 남는다
+  const withPhoto = structuredClone(doc);
+  withPhoto.nodes[dos].children[1].items[0].image.asset = { id: 'P1' };
+  const edit = directTarget(withPhoto, ['nodes', dos, 'children', 1, 'items', 0]);
+  const edited = getAt(edit.apply(withPhoto, ['새 제목', '새 설명']), ['nodes', dos, 'children', 1, 'items', 0]);
+  assert.deepEqual([edited.title, edited.image.asset.id], ['새 제목', 'P1']);
 
   assert.equal(directInsert(doc, ['nodes', 1, 'children', 0, 'text'], 0), null);
 });

@@ -121,7 +121,8 @@ function gridBlocks(n, uploads) {
     if (im && n.imagesFirst) out.push(im); // 불러온 브리프는 사진이 줄 위에 오기도 한다
     out.push(columns(...row.map((it) => {
       const { title, desc } = gridItemText(it, LANG);
-      return [head(3, `${it.n}. ${title}`), ...(desc ? [para(desc)] : [])];
+      const pic = it.image ? image(it.image, uploads) : null; // 새로 만든 기획서는 항목마다 사진 하나, 번호 아래에
+      return [head(3, `${it.n}. ${title}`), ...(desc ? [para(desc)] : []), ...(pic ? [pic] : [])];
     }), ...(row.length === 1 ? [[]] : [])));
     if (im && !n.imagesFirst) out.push(im);
   });

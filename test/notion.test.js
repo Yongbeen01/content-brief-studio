@@ -107,7 +107,13 @@ test('변환: 원본 템플릿과 같은 뼈대', () => {
   assert.deepEqual(right.filter((b) => b.type === 'heading_3').map((b) => b.heading_3.rich_text[0].text.content),
     ['⏱ Time Duration', '🩷 Action', '👁 Visual', '🔤 Subtitle', '💬 Narration']);
   const dos = blocks.find((b) => b.type === 'callout' && b.callout.color === 'green_background');
-  assert.deepEqual(dos.callout.children.map((b) => b.type), ['heading_3', 'column_list', 'image', 'column_list', 'image']);
+  // 예시 사진은 항목마다 하나 — 그 항목 칸의 맨 아래(번호·설명 밑)
+  assert.deepEqual(dos.callout.children.map((b) => b.type), ['heading_3', 'column_list', 'column_list']);
+  for (const row of dos.callout.children.slice(1)) {
+    for (const col of row.column_list.children) {
+      assert.deepEqual(col.column.children.map((b) => b.type), ['heading_3', 'paragraph', 'image']);
+    }
+  }
   assert.equal(dos.callout.icon, undefined);
   const header = blocks[1].callout.children.map((b) => b.heading_3.rich_text.map((r) => r.text.content).join(''));
   assert.deepEqual(header.map((h) => h.slice(0, 3)), ['UPL', '1. ', '2. ', '👉 ', '3. ']);
@@ -153,7 +159,7 @@ test('게시: 모든 요청이 중첩 2단·100개 이하, 순서 유지, 사진
     assert.ok(a.depth <= 2, `depth ${a.depth}`);
     assert.ok(a.len <= 100);
   }
-  assert.equal(fake.log.filter((e) => e.path === '/v1/file_uploads').length, 9);
+  assert.equal(fake.log.filter((e) => e.path === '/v1/file_uploads').length, 13); // 제품 1 + 스텝 4 + Do's 4 + Don'ts 4
   // 페이지 바로 아래 블록 순서가 문서와 같다
   const pageId = res.pageId.replace(/-/g, '');
   const top = fake.tree.get(pageId);
