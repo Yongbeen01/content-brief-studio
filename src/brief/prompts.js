@@ -348,65 +348,6 @@ export function referenceUser({
   return `${body}${again}${feedback ? `\n\n고칠 점: ${feedback}` : ''}`;
 }
 
-// ── 트렌드 해시태그 ─────────────────────────────────────────────────────────
-
-/**
- * 틱톡 트렌드 해시태그(Creative Center 업종 순위) 중 이 기획서와 맞는 한두 개를 골라, 지금 해시태그 한두 개와 바꾼다.
- * 나머지 해시태그는 그대로 둔다 — 고르는 것도 바꿀 자리를 정하는 것도 여기, 실제로 바꾸는 건 trend-tags.js(코드).
- */
-export function trendSystem() {
-  return [
-    'You choose TikTok hashtags for a creator video brief written by a Korean beauty brand team for US creators.',
-    'You get the brief (brand, product, selling points, concept, a summary), the hashtags it uses now, and the hashtags',
-    'trending on TikTok right now in the same industry (ranked).',
-    '',
-    'Pick 1 or 2 trending hashtags that genuinely fit this brief, and for each one say which current hashtag it replaces.',
-    '- A good pick names what the video is really about: the product type, the skin/hair concern it solves, a key ingredient,',
-    '  the texture or result, the routine or video format the concept uses. A creator posting this exact video should be',
-    '  able to use the tag honestly.',
-    '- Do not pick tags tied to unrelated news, events, sales days, people, other brands or other product categories,',
-    '  or tags that would make the video look like something it is not. If nothing fits, return an empty list — that is',
-    '  better than a wrong tag.',
-    '- Copy the trending tag exactly as listed. Never pick one the brief already has.',
-    '- Replace the current hashtag that is the most generic or least tied to this product. Never replace the brand hashtag.',
-    '- why: one short sentence in Korean saying how the tag fits this brief.',
-    'Return only the JSON object in the provided schema.',
-  ].join('\n');
-}
-
-/**
- * @param {object} o
- * @param {{ brand:string, product:string, sellingPoints:string[], concept:string, whatIsIt?:string[], mainIdea?:string[], caption?:string, steps?:string[] }} o.brief
- * @param {string[]} o.current     지금 해시태그(#소문자)
- * @param {string} o.brandTag      브랜드 해시태그(바꾸면 안 되는 것), 없으면 ''
- * @param {{ rank:number, tag:string, posts:number, views:number }[]} o.trends
- * @param {string} o.scope         예: 'US · Beauty & Personal Care · last 7 days'
- */
-export function trendUser({
-  brief, current, brandTag = '', trends, scope = '', feedback = '',
-}) {
-  const list = (items) => (items ?? []).map((t) => `- ${String(t).trim()}`).filter((l) => l.length > 2).join('\n');
-  const num = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : String(n));
-  return [
-    '# Brief',
-    `Brand: ${brief.brand}`,
-    `Product: ${brief.product}`,
-    `Selling points:\n${list(brief.sellingPoints)}`,
-    `Concept: ${brief.concept}`,
-    ...(brief.whatIsIt?.length ? [`What is it:\n${list(brief.whatIsIt)}`] : []),
-    ...(brief.mainIdea?.length ? [`Main idea:\n${list(brief.mainIdea)}`] : []),
-    ...(brief.caption ? [`Caption: ${brief.caption}`] : []),
-    ...(brief.steps?.length ? [`Steps:\n${list(brief.steps)}`] : []),
-    '',
-    '# Current hashtags',
-    current.map((t) => (t === brandTag ? `${t} (brand — keep)` : t)).join(' '),
-    '',
-    `# Trending hashtags${scope ? ` (${scope})` : ''} — rank. tag (posts, views)`,
-    ...trends.map((t) => `${t.rank}. ${t.tag} (${num(t.posts)} posts, ${num(t.views)} views)`),
-    ...(feedback ? ['', `Fix: ${feedback}`] : []),
-  ].join('\n');
-}
-
 // ── 기존 브리프 PDF 옮겨 적기 ───────────────────────────────────────────────
 
 /**

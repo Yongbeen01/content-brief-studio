@@ -13,7 +13,6 @@ import * as archive from './archive.js';
 import { startJob, getJob, jobView, cancelJob } from './jobs.js';
 import { generateBrief, findPartnershipPage } from './brief/generate.js';
 import { referenceKeywords } from './brief/reference.js';
-import { getTrendHashtags } from './tiktok/trends.js';
 import * as videos from './video/store.js';
 import { prepareVideo } from './video/prepare.js';
 import { matchClip, stepSummary } from './video/match.js';
@@ -431,15 +430,7 @@ async function handleApi(req, res, url) {
     }
     const started = Date.now();
     const job = startJob('generate', ({ progress, signal, dir }) => generateBrief({
-      inputs,
-      sourceIds,
-      jobDir: dir,
-      onProgress: progress,
-      signal,
-      lookupPartnership,
-      useImage: useSourceImage,
-      // 틱톡 트렌드 해시태그 — 세션이 없거나 끊겼으면 이 PC 에 로그인 창을 띄운다(src/tiktok/trends.js).
-      trends: config.tiktokTrends?.enabled === false ? null : getTrendHashtags,
+      inputs, sourceIds, jobDir: dir, onProgress: progress, signal, lookupPartnership, useImage: useSourceImage,
     }).then((r) => {
       // 끝나는 순간 아카이브에 남긴다 — 만드는 동안 창을 닫았어도 결과를 다시 열 수 있다.
       let saved = null;

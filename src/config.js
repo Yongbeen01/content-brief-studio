@@ -24,7 +24,6 @@ export const DIRS = {
   videos: path.join(DATA_DIR, 'videos'),
   tools: path.join(DATA_DIR, 'tools'),
   logs: path.join(DATA_DIR, 'logs'),
-  tiktok: path.join(DATA_DIR, 'tiktok'), // 틱톡 로그인 세션·전용 브라우저 프로필·트렌드 목록(비밀값 — 레포 밖)
 };
 
 export const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
@@ -45,29 +44,13 @@ const DEFAULTS = {
    * 기존 브리프 PDF 옮겨 적기는 판단이 아니라 베끼기라 sonnet(빠르다).
    * 레퍼런스 검색어는 창을 띄워 놓고 기다리는 일이라 sonnet(몇 초).
    * 전체 수정은 문서 전체에서 지시가 짚는 자리를 찾아 고치고 나머지는 글자 그대로 둬야 해서 opus.
-   * 트렌드 해시태그 고르기는 100개 목록에서 한두 개를 고르는 짧은 판단이라 sonnet(영어본 만들기와 같이 돈다).
    * 별칭(opus/sonnet/haiku)은 CLI 가 그때그때 최신 모델로 푼다.
    */
   models: {
-    compose: 'opus', edit: 'sonnet', translate: 'opus', frames: 'sonnet', match: 'claude-opus-5', verify: 'sonnet', importPdf: 'sonnet', reference: 'sonnet', revise: 'opus', trends: 'sonnet',
+    compose: 'opus', edit: 'sonnet', translate: 'opus', frames: 'sonnet', match: 'claude-opus-5', verify: 'sonnet', importPdf: 'sonnet', reference: 'sonnet', revise: 'opus',
   },
   timeouts: {
-    composeMs: 8 * 60_000, editMs: 3 * 60_000, framesMs: 8 * 60_000, matchMs: 4 * 60_000, verifyMs: 3 * 60_000, mediaMs: 10 * 60_000, referenceMs: 2 * 60_000, reviseMs: 6 * 60_000, trendsMs: 2 * 60_000,
-  },
-
-  /**
-   * 틱톡 트렌드 해시태그(Creative Center) — 생성할 때 가이드 한눈에 보기 표의 해시태그 한두 개를 바꾼다(src/tiktok/trends.js).
-   * 로그인해야 100개가 온다(안 하면 3개). 업종 14000000000 = Beauty & Personal Care, 기간은 7·30·120일.
-   */
-  tiktokTrends: {
-    enabled: true,
-    country: 'US',
-    industryId: '14000000000',
-    period: 7,
-    max: 100,
-    cacheMs: 6 * 3_600_000, // 받은 100개를 이만큼은 다시 쓴다(틱톡은 하루 단위로 갱신)
-    staleMs: 3 * 86_400_000, // 로그인을 못 했을 때 이만큼 지난 100개까지는 쓴다
-    loginTimeoutMs: 10 * 60_000, // 로그인 창을 이만큼 기다리고 닫는다
+    composeMs: 8 * 60_000, editMs: 3 * 60_000, framesMs: 8 * 60_000, matchMs: 4 * 60_000, verifyMs: 3 * 60_000, mediaMs: 10 * 60_000, referenceMs: 2 * 60_000, reviseMs: 6 * 60_000,
   },
 
   /** 영상 → 참고 GIF */
