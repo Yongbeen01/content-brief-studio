@@ -691,31 +691,121 @@ details.card[open] > summary .fx-chevron { transform: rotate(180deg); }
 .vp-manual input { width: 62px; padding: 4px 6px; font-size: 0.8rem; }
 .vp-manual span { color: var(--fx-text-weaker); font-size: 0.8rem; }
 
-.clip-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+/* 구간 고르기 창 — 위는 추천 후보 3개(나란히), 아래는 직접 컷 편집(cut-editor.js) */
+.fx-modal.clip-dialog { max-width: 1000px; max-height: min(94vh, 1040px); }
+.clip-sec { font-size: 0.82rem; font-weight: 600; color: var(--fx-text-weak); margin-bottom: -4px; }
+.clip-sec span { font-weight: 400; color: var(--fx-text-weaker); }
+.clip-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: stretch; }
 .clip-cand {
-  display: flex; flex-direction: column; gap: 6px; text-align: left; font: inherit; cursor: pointer;
-  background: var(--fx-sunken); border: 1px solid var(--fx-input-stroke);
+  display: flex; flex-direction: column; gap: 6px; text-align: left; font: inherit; cursor: pointer; min-width: 0;
+  background: var(--fx-card); border: 1px solid var(--fx-input-stroke);
   border-radius: var(--fx-r-sm); padding: 8px;
 }
 .clip-cand:hover { border-color: var(--fx-blue); }
 .clip-cand video { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #000; border-radius: 6px; }
-/* 이어 붙인 제안은 맨 위에 한 줄로 크게 */
-.clip-seq { grid-column: 1 / -1; flex-direction: row; gap: 12px; border-color: var(--fx-blue-weaker); background: var(--fx-blue-weakest); }
-.clip-seq video { width: 240px; flex: none; }
+/* 가장 유력한 후보는 진하게(파란 칸) */
+.clip-cand.is-top { border: 2px solid var(--fx-blue); background: var(--fx-blue-weakest); padding: 7px; }
+.clip-top { align-self: flex-start; font-size: 0.7rem !important; font-weight: 700; color: #fff !important; background: var(--fx-blue);
+  border-radius: 999px; padding: 1px 8px; flex: none !important; }
 .clip-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1 1 auto; }
 .clip-parts { font-size: 0.75rem !important; color: var(--fx-text-weaker) !important; flex: none !important; }
 .clip-parts.bad { color: var(--fx-error) !important; }
 .clip-cand.weak { opacity: 0.72; }
 .clip-seen { font-size: 0.75rem !important; color: var(--fx-text) !important; flex: none !important; }
-.clip-videos { margin: -4px 0 10px; padding: 8px 12px; list-style: none; display: flex; flex-direction: column; gap: 3px;
-  font-size: 0.8rem; color: var(--fx-text-weak); background: var(--fx-sunken); border-radius: var(--fx-r-sm); }
+.clip-videos { margin: -4px 0 0; padding: 8px 12px; list-style: none; display: flex; flex-direction: column; gap: 3px;
+  font-size: 0.8rem; color: var(--fx-text-weak); background: var(--fx-card); border-radius: var(--fx-r-sm); }
 .clip-videos b { color: var(--fx-text); font-weight: 600; }
 .clip-videos li.unused b { color: var(--fx-warning); }
-.clip-manual select { width: auto; max-width: 180px; }
 .clip-cand b { font-size: 0.8rem; }
 .clip-cand span { font-size: 0.8rem; color: var(--fx-text-weak); line-height: 1.4; flex: 1 1 auto; }
-.clip-cand .vp-btn { margin-top: 2px; }
-.clip-manual { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; flex-wrap: wrap; }
-.clip-manual label { font-weight: 600; color: var(--fx-text-weak); }
-.clip-manual input { width: 96px; }
+.clip-cand .vp-btn { margin-top: auto; }
 @media (max-width: 760px) { .clip-grid { grid-template-columns: 1fr; } }
+
+/* 직접 컷 편집 */
+.ce { position: relative; display: flex; flex-direction: column; gap: 10px; padding: 12px;
+  background: var(--fx-card); border: 1px solid var(--fx-input-stroke); border-radius: var(--fx-r-sm); }
+.ce [hidden] { display: none !important; }
+.ce-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.ce-head b { font-size: 0.88rem; }
+.ce-hint { font-size: 0.76rem; color: var(--fx-text-weaker); }
+.ce-top { display: flex; gap: 14px; align-items: flex-start; }
+.ce-stage { position: relative; flex: none; width: 170px; height: 300px; background: #000; border-radius: 6px; overflow: hidden; }
+.ce-stage video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: none; }
+.ce-stage video.on { display: block; }
+.ce-stage-msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 1;
+  color: rgba(255, 255, 255, 0.75); font-size: 0.8rem; text-align: center; padding: 10px; }
+.ce-side { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.ce-label { font-size: 0.78rem; font-weight: 600; color: var(--fx-text-weak); }
+.ce-thumbs { display: flex; flex-wrap: wrap; gap: 8px; }
+.ce-thumb { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; width: 72px; padding: 3px;
+  font: inherit; cursor: pointer; background: none; border: 2px solid transparent; border-radius: 8px; }
+.ce-thumb:hover { background: var(--fx-fill); }
+.ce-thumb video { display: block; width: 62px; height: 100px; object-fit: cover; background: #000; border-radius: 5px;
+  filter: grayscale(1); opacity: 0.45; pointer-events: none; }
+.ce-thumb.on { border-color: var(--fx-blue); background: var(--fx-blue-weakest); }
+.ce-thumb.on video { filter: none; opacity: 1; }
+.ce-thumb-n { position: absolute; top: 6px; left: 6px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 10px;
+  background: var(--fx-blue); color: #fff; font-size: 0.72rem; font-weight: 700; display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 0 2px #fff; }
+.ce-thumb-name { font-size: 0.76rem; font-weight: 600; color: var(--fx-text); }
+.ce-thumb-sub { font-size: 0.68rem; color: var(--fx-text-weaker); }
+.ce-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; max-height: 150px; overflow-y: auto; }
+.ce-list li { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; font-size: 0.8rem; cursor: pointer;
+  font-variant-numeric: tabular-nums; }
+.ce-list li:hover { background: var(--fx-fill); }
+.ce-list li b { min-width: 18px; height: 18px; border-radius: 9px; background: var(--fx-blue-weaker); color: var(--fx-blue-hover);
+  font-size: 0.7rem; display: flex; align-items: center; justify-content: center; }
+.ce-list li em { font-style: normal; color: var(--fx-text-weaker); }
+.ce-list li.ce-list-empty { cursor: default; color: var(--fx-text-weaker); }
+.ce-list li.ce-list-empty:hover { background: none; }
+.ce-transport { display: flex; align-items: center; gap: 10px; font-size: 0.8rem; }
+.ce-play { flex: none; width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--fx-input-stroke); background: var(--fx-card);
+  cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; }
+.ce-play::before { content: ''; width: 0; height: 0; margin-left: 3px; border-style: solid; border-width: 6px 0 6px 10px;
+  border-color: transparent transparent transparent var(--fx-text); }
+.ce-play.is-playing::before { margin: 0; width: 10px; height: 12px; border: 0; border-left: 3px solid var(--fx-text); border-right: 3px solid var(--fx-text); box-sizing: border-box; }
+.ce-play:hover:not(:disabled) { border-color: var(--fx-blue); }
+.ce-play:disabled { opacity: 0.4; cursor: not-allowed; }
+.ce-time { font-variant-numeric: tabular-nums; color: var(--fx-text); }
+.ce-zoom-wrap { margin-left: auto; display: flex; align-items: center; gap: 6px; color: var(--fx-text-weak); font-size: 0.76rem; }
+.ce-zoom { width: 120px; accent-color: var(--fx-blue); }
+.ce-scroll { overflow-x: auto; overflow-y: hidden; background: var(--fx-sunken); border: 1px solid var(--fx-input-stroke); border-radius: 6px; }
+.ce-track { position: relative; height: 80px; user-select: none; touch-action: none; cursor: copy; }
+.ce-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; color: var(--fx-text-weaker); cursor: default; }
+.ce-ruler { position: absolute; left: 0; right: 0; top: 0; height: 22px; cursor: ew-resize; }
+.ce-tick { position: absolute; bottom: 0; width: 1px; height: 4px; background: var(--fx-text-weaker); pointer-events: none; }
+.ce-tick.major { height: 8px; background: var(--fx-text-weak); }
+.ce-tick span { position: absolute; bottom: 8px; left: 3px; font-size: 0.66rem; color: var(--fx-text-weak); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* 영상 칸이 시작하는 눈금 — 길게, 이름은 진하게 */
+.ce-tick.start { height: 22px; background: var(--fx-text-weak); }
+.ce-tick span.name { bottom: 6px; left: 4px; font-weight: 700; color: var(--fx-text); }
+.ce-seg { position: absolute; top: 24px; height: 48px; background: var(--fx-fill); border-radius: 4px; box-shadow: inset 0 0 0 1px var(--fx-input-stroke); }
+.ce-range { position: absolute; top: 24px; height: 48px; box-sizing: border-box; cursor: ew-resize;
+  border-top: 2px solid var(--fx-blue); border-bottom: 2px solid var(--fx-blue); background: rgba(2, 99, 224, 0.2); }
+.ce-handle { position: absolute; top: -2px; bottom: -2px; width: 10px; background: var(--fx-blue); cursor: col-resize; }
+.ce-handle.l { left: -10px; border-radius: 4px 0 0 4px; }
+.ce-handle.r { right: -10px; border-radius: 0 4px 4px 0; }
+.ce-handle::after { content: ''; position: absolute; top: 50%; left: 4px; width: 2px; height: 14px; margin-top: -7px; background: rgba(255, 255, 255, 0.85); border-radius: 1px; }
+.ce-range.is-drag { background: rgba(2, 99, 224, 0.28); }
+/* 0초 — 놓으면 구간 선택 취소 */
+.ce-range.zero { border-color: var(--fx-error); background: rgba(219, 19, 42, 0.18); }
+.ce-range.zero .ce-handle { background: var(--fx-error); }
+.ce-playhead { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px solid var(--fx-text); margin-left: -1px; pointer-events: none; z-index: 3; }
+.ce-playhead-knob { position: absolute; top: 0; left: -7px; width: 12px; height: 14px; background: var(--fx-text); pointer-events: auto; cursor: ew-resize;
+  clip-path: polygon(0 0, 100% 0, 100% 60%, 50% 100%, 0 60%); }
+.ce-pop { position: absolute; z-index: 10; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px;
+  background: var(--fx-card); border-radius: 8px; box-shadow: var(--fx-shadow-pop), 0 0 0 1px var(--fx-input-stroke); pointer-events: none; }
+.ce-pop::after { content: ''; position: absolute; top: 100%; left: var(--arrow, 50%); margin-left: -6px;
+  border: 6px solid transparent; border-top-color: var(--fx-card); }
+.ce-pop canvas { display: block; background: #000; border-radius: 4px; }
+.ce-pop-text { font-size: 0.72rem; color: var(--fx-text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ce-pop.zero { background: var(--fx-error); padding: 5px 10px; box-shadow: var(--fx-shadow-pop); }
+.ce-pop.zero::after { border-top-color: var(--fx-error); }
+.ce-pop.zero canvas { display: none; }
+.ce-pop.zero .ce-pop-text { color: #fff; font-weight: 600; font-size: 0.78rem; }
+.ce-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ce-total { font-size: 0.82rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ce-warn { font-size: 0.75rem; color: var(--fx-warning); }
+.ce-make { margin-left: auto; }
+.ce-make:disabled { opacity: 0.45; cursor: not-allowed; }
+@media (max-width: 760px) { .ce-top { flex-direction: column; } }

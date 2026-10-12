@@ -116,6 +116,23 @@ export async function previewMp4(src, dest, { start, end, ...opts }) {
 }
 
 /**
+ * 컷 편집기가 돌려 보는 탐색용 mp4(소리 없음) — 영상 전체를 긴 변 640px 로.
+ * 인디케이터·구간 끝을 끌 때마다 그 초로 옮겨 가야 해서 키프레임을 8장마다(30fps 면 0.27초) 박는다 —
+ * 원본처럼 키프레임이 성기면 옮길 때마다 멈칫거린다. 틱톡 원본은 HEVC 일 때도 있어 H.264 로 다시 만든다.
+ */
+export async function scrubMp4(src, dest, opts = {}) {
+  const { ffmpeg } = await tools(opts);
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  await run(ffmpeg, [
+    '-y', '-i', src, '-an', '-c:v', 'libx264', '-crf', '28', '-preset', 'veryfast',
+    '-vf', "scale='if(gt(iw,ih),640,-2)':'if(gt(iw,ih),-2,640)'",
+    '-g', '8', '-keyint_min', '8', '-sc_threshold', '0',
+    '-pix_fmt', 'yuv420p', '-movflags', '+faststart', dest,
+  ], opts);
+  return dest;
+}
+
+/**
  * 여러 구간을 하나로 이어 붙인다 — 다른 영상에서 가져온 조각이어도 된다.
  *
  * 조각마다 **크기·fps 를 먼저 맞춘 뒤** 이어 붙인다. 필터 하나로 한 번에 묶으면 크기가 다른 영상에서

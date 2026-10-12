@@ -325,15 +325,17 @@
     </div>
   </dialog>
 
-  <!-- 구간 고르기 — 미리보기가 커야 고를 수 있어 이것만 창으로 띄운다(올리기·처리는 상자 안에서) -->
-  <dialog class="fx-overlay fx-modal wide" id="clip_dialog">
+  <!-- 구간 고르기 — 미리보기가 커야 고를 수 있어 이것만 창으로 띄운다(올리기·처리는 상자 안에서).
+       위는 추천 후보 3개(나란히, 가장 유력한 것은 파란 칸), 아래는 직접 컷 편집(cut-editor.js). -->
+  <dialog class="fx-overlay fx-modal wide clip-dialog" id="clip_dialog">
     <div class="fx-overlay-head">구간 고르기 <span class="fx-spacer"></span>
       <button type="button" class="fx-overlay-close" data-close aria-label="닫기"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
     </div>
     <div class="fx-overlay-body">
       <p class="fx-help" id="clip_where"></p>
+      <div class="clip-sec">추천 구간 <span>— 누르면 그 구간으로 바로 GIF 를 만듭니다</span></div>
       <div class="clip-grid" id="clip_grid"></div>
-      <div class="clip-manual" id="clip_manual"></div>
+      <div id="clip_cut"></div>
     </div>
     <div class="fx-overlay-foot">
       <div class="fx-overlay-actions"><button type="button" class="secondary-btn" data-close>닫기</button></div>

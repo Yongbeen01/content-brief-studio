@@ -17,7 +17,9 @@ const {
 } = await import('../src/video/match.js');
 const { DESCRIBE_VERSION, describeUser, verifyUser } = await import('../src/video/prompts.js');
 const { applyChecks } = await import('../src/video/verify.js');
-const { passes, rankOf, topPick, checkLabel } = await import('../web/js/clip-rank.js');
+const {
+  passes, rankOf, rankedPicks, topPick, checkLabel,
+} = await import('../web/js/clip-rank.js');
 const { buildDoc } = await import('../src/brief/build.js');
 
 const sample = JSON.parse(fs.readFileSync(new URL('./fixtures/compose-sample.json', import.meta.url), 'utf8'));
@@ -489,4 +491,18 @@ test('후보 순서 — 고를 때의 판단을 따르고, 실제 장면 확인�
   // 확인이 없으면 확신도로
   assert.equal(topPick({ singles: [{ confidence: 0.5 }], sequence: { parts: [], confidence: 0.4 } }).seq, undefined);
   assert.equal(topPick({ singles: [], sequence: null }), null);
+});
+
+test('창에 나란히 보여 줄 추천 — 최대 3개, 맨 앞은 늘 가장 유력한 후보', () => {
+  const s = (c, fits) => ({ videoId: `v${c}`, confidence: c / 10, ...(fits !== undefined ? { check: { fits } } : {}) });
+  const singles = [s(8), s(7), s(6, 0.3)];
+  const seqOf = (confidence, fits) => ({ parts: [{ videoId: 'a' }, { videoId: 'b' }], confidence, check: { fits } });
+  const kinds = (list) => list.map((p) => (p.seq ? 'seq' : p.cand.videoId));
+  assert.deepEqual(kinds(rankedPicks({ singles, sequence: seqOf(0.9, 0.8) })), ['seq', 'v8', 'v7'], '이어 붙인 것이 1등이면 맨 앞, 4번째는 빠진다');
+  assert.deepEqual(kinds(rankedPicks({ singles, sequence: seqOf(0.75, 0.8) })), ['v8', 'seq', 'v7'], '사이 제자리에');
+  assert.deepEqual(kinds(rankedPicks({ singles, sequence: seqOf(0.9, 0.2) })), ['v8', 'v7', 'v6'], '미흡하면 뒤로 밀려 안 보인다');
+  assert.deepEqual(kinds(rankedPicks({ singles: singles.slice(0, 1), sequence: null })), ['v8']);
+  for (const sequence of [seqOf(0.9, 0.8), seqOf(0.75, 0.8), seqOf(0.9, 0.2), null]) {
+    assert.equal(rankedPicks({ singles, sequence })[0].cand, topPick({ singles, sequence }).cand, '맨 앞 = topPick');
+  }
 });

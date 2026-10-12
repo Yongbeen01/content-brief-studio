@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
+import { pipeline } from 'node:stream';
 import path from 'node:path';
 import { ROOT, config, notionRedirectUri, appVersion } from './config.js';
 import { authStatus, authLogin, authLogout, refreshAuth } from './claude/cli.js';
@@ -17,6 +18,7 @@ import { prepareVideo } from './video/prepare.js';
 import { matchClip, stepSummary } from './video/match.js';
 import { makeClipAsset, makePreviews } from './video/clip.js';
 import { verifyPicks } from './video/verify.js';
+import { ensureScrub, parseRange } from './video/scrub.js';
 import { toolsStatus } from './media/tools.js';
 import { runEdit, runInsert } from './brief/edit.js';
 import { runRevise } from './brief/revise.js';
@@ -231,6 +233,33 @@ async function handleApi(req, res, url) {
     res.writeHead(200, { 'content-type': 'video/mp4', 'content-length': data.length, 'cache-control': 'private, max-age=600' });
     return res.end(data);
   }
+  // 컷 편집기가 돌려 보는 영상 전체(탐색용). 끌어서 옮기려면 구간 요청(Range)에 답해야 한다. 없으면 여기서 만든다.
+  if (m === 'GET' && /^\/api\/videos\/[^/]+\/scrub$/.test(p)) {
+    const id = p.split('/')[3];
+    if (!videos.getVideo(id)) return json(res, 404, { error: '영상을 찾지 못했습니다.' });
+    let file;
+    try {
+      file = await ensureScrub(id);
+    } catch (e) {
+      return json(res, 500, { error: String(e.message ?? e).slice(0, 300) });
+    }
+    const { size } = fs.statSync(file);
+    const range = parseRange(req.headers.range, size);
+    if (range === 'bad') {
+      res.writeHead(416, { 'content-range': `bytes */${size}` });
+      return res.end();
+    }
+    const head = { 'content-type': 'video/mp4', 'accept-ranges': 'bytes', 'cache-control': 'private, max-age=600' };
+    // 옮길 때마다 브라우저가 앞 요청을 끊는다 — pipeline 이라야 끊긴 쪽 파일도 닫힌다(pipe 는 열린 채 남는다)
+    if (!range) {
+      res.writeHead(200, { ...head, 'content-length': size });
+      return pipeline(fs.createReadStream(file), res, () => {});
+    }
+    res.writeHead(206, {
+      ...head, 'content-length': range.end - range.start + 1, 'content-range': `bytes ${range.start}-${range.end}/${size}`,
+    });
+    return pipeline(fs.createReadStream(file, range), res, () => {});
+  }
   if (m === 'GET' && p === '/api/drafts/current') return json(res, 200, { draft: store.currentDraft() });
   if (m === 'GET' && p === '/api/drafts') return json(res, 200, { drafts: store.listDrafts() });
   if (m === 'GET' && p.startsWith('/api/drafts/')) return json(res, 200, { draft: store.loadDraft(p.split('/').pop()) });
@@ -336,6 +365,8 @@ async function handleApi(req, res, url) {
     const videoIds = (body.videoIds ?? []).filter((x) => typeof x === 'string');
     if (!videoIds.length) return json(res, 400, { error: '영상이 없습니다.' });
     const job = startJob('video-match', async ({ progress, signal, dir }) => {
+      // 컷 편집기가 돌려 볼 탐색용 영상 — Claude 를 기다리는 동안 같이 만들어 둔다(못 만들어도 창을 열 때 다시 만든다)
+      const scrubs = videoIds.map((id) => ensureScrub(id).catch(() => null));
       const found = await matchClip({
         videoIds, doc: body.doc, path: body.path, jobDir: dir, onProgress: progress, signal,
       });
@@ -351,6 +382,7 @@ async function handleApi(req, res, url) {
         if (signal?.aborted) throw e;
         checked.verifyError = String(e.message ?? e).slice(0, 200);
       }
+      await Promise.all(scrubs);
       return {
         singles: checked.singles,
         sequence: checked.sequence,

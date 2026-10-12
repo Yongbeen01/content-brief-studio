@@ -23,6 +23,25 @@ export function topPick({ singles = [], sequence = null } = {}) {
   return { parts: [one], cand: one };
 }
 
+/** 구간 고르기 창에 나란히 보여 주는 추천 수 */
+export const SHOW_PICKS = 3;
+
+/**
+ * 창에 나란히 보여 줄 추천 — 이어 붙인 것을 한 구간짜리들 사이 제자리에 끼워 앞에서부터 max 개.
+ * 한 구간짜리끼리의 순서는 그대로 두므로 맨 앞은 늘 topPick 과 같다(그 칸을 진하게 칠한다).
+ */
+export function rankedPicks({ singles = [], sequence = null } = {}, max = SHOW_PICKS) {
+  const seq = sequence ? { parts: sequence.parts, cand: sequence, seq: true } : null;
+  const out = [];
+  let placed = !seq;
+  for (const one of singles) {
+    if (!placed && rankOf(sequence) >= rankOf(one)) { out.push(seq); placed = true; }
+    out.push({ parts: [one], cand: one });
+  }
+  if (!placed) out.push(seq);
+  return out.slice(0, max);
+}
+
 /** 카드에 붙는 판정 글자. */
 export function checkLabel(c) {
   if (!c?.check) return '';
