@@ -170,6 +170,7 @@ async function handleApi(req, res, url) {
   }
 
   // 캠페인 고르기 — 목록(5분 캐시)과, 고른 캠페인의 Account ID·업로드폼 링크.
+  // 화면은 목록만 쓴다(업로드폼은 직접 넣는다 — 2026-10-12). 한 건 조회는 메일에서 폼을 찾던 예전 방식이라 남겨만 둔다.
   if (m === 'GET' && p === '/api/campaigns') {
     if (!kglowing.isConfigured()) return json(res, 200, { configured: false, campaigns: [] });
     try {

@@ -74,7 +74,7 @@
                업로드폼 링크(캠페인 메일 템플릿)를 가져온다(web/js/campaign.js). 브리프 이름은 받지 않는다 — 생성 뒤 자동. -->
           <div class="form-group" id="campaign_group">
             <label for="campaign_trigger" class="fx-required-label" data-req="campaign">캠페인</label>
-            <p class="form-hint" id="campaign_hint">고르면 Account ID 와 업로드폼 링크를 캠페인 정보에서 가져옵니다.</p>
+            <p class="form-hint" id="campaign_hint">고르면 Account ID 를 캠페인 정보에서 가져옵니다. 업로드폼 링크는 아래에 직접 넣어 주세요.</p>
             <div class="campaign-combo" id="campaign_combo">
               <button type="button" class="campaign-combo-trigger" id="campaign_trigger"
                       aria-haspopup="listbox" aria-expanded="false" aria-controls="campaign_list">
@@ -91,7 +91,7 @@
             <dl class="kv campaign-info hidden" id="campaign_info"></dl>
           </div>
 
-          <!-- 캠페인에 업로드폼 링크가 없을 때만 보인다(메일이 {{google_form_url}} 변수만 쓰는 캠페인 등) -->
+          <!-- 업로드폼 링크는 늘 직접 넣는다 — 캠페인 메일에서 찾아 채우지 않는다(2026-10-12 사용자 지시). 목록을 불러오는 동안만 숨긴다 -->
           <div class="form-group hidden" id="f_upload_group">
             <label for="f_upload" class="fx-required-label" data-req="uploadUrl">업로드폼 링크</label>
             <p class="form-hint" id="f_upload_hint">크리에이터가 영상 주소를 제출할 폼 — 「submit your video URL here」에 걸립니다.</p>

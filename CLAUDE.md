@@ -111,10 +111,11 @@ OAuth 연결 자체를 확인할 때만 설치본을 멈추고 4325 로 띄운�
   kglowing 외부 API(`X-API-KEY`, `config.externalApi.key`). 목록은 `/api/v1/seeding/campaigns`(200개씩, 전체 7초 → 켤 때 미리 받고
   5분 지나면 옛 목록을 주며 뒤에서 새로 받는다). **Account ID** = `hashTagAccount` — 태그 감지용 변형 목록이라
   (`clerivy.global, CLERIVY.GLOBAL, Clerivy,global`) 대소문자·점밑줄만 다른 것과 다른 계정의 조각을 걸러 낸다(`campaignAccounts`).
-  **업로드폼 링크는 API 에 칸이 없다** — 캠페인 메일 템플릿(`/mail-templates`)의 리마인드·땡큐레터 버튼(「Send Your Video Details」)에서 찾는다
-  (`findUploadForm` 점수: 배송 뒤 메일 +, 영상 제출 말 +, 지원·가입 말 −). 템플릿이 `{{google_form_url}}` 변수만 쓰는 캠페인은
-  실제 링크가 API 어디에도 없다 → 화면이 그 칸만 직접 받는다. 키가 없거나 목록을 못 받으면 예전처럼 둘 다 직접 넣는다.
-  폼 값: `inputs.campaign`(고른 캠페인 스냅숏) → `uploadUrl`·`accountId` 는 **쓰일 값**, 직접 넣은 것은 `manualUploadUrl`·`manualAccountId`.
+  **업로드폼 링크는 늘 직접 넣는다**(2026-10-12 사용자 지시 — 캠페인을 골라도 자동으로 채우지 않는다. 계정만 캠페인에서 가져온다).
+  예전엔 캠페인 메일 템플릿(`/mail-templates`)의 리마인드·땡큐레터 버튼에서 찾아 채웠다 — 서버 `GET /api/campaigns/:id`·`findUploadForm`
+  (점수: 배송 뒤 메일 +, 영상 제출 말 +, 지원·가입 말 −)은 남아 있지만 화면은 부르지 않는다. 키가 없거나 목록을 못 받으면 둘 다 직접 넣는다.
+  폼 값: `inputs.campaign`(고른 캠페인 스냅숏) → `uploadUrl`(= `manualUploadUrl`)·`accountId` 는 **쓰일 값**, 직접 넣은 것은 `manualUploadUrl`·`manualAccountId`.
+  자동으로 채우던 때의 초안·아카이브(`campaign.uploadUrl` 만 있음)는 열 때 그 링크를 업로드폼 칸에 보여 준다(`fillForm`).
 - **브리프 이름은 받지 않는다**: 작성 결과의 `titleProduct`·`titleConcept`(영어, 스키마 맨 끝 = 내용을 다 쓴 뒤)로
   `build.js briefTitle` 이 `[BRAND]US_TikTok_<제품> _<컨셉> Guide` 를 만든다. 고치는 곳은 [노션에 최종 생성] 창의 제목 칸뿐.
   예전 초안의 `inputs.briefName` 은 있으면 그대로 따른다.

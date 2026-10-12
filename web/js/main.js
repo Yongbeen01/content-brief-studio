@@ -60,8 +60,6 @@ const state = {
   archive: [],
   /** 캠페인 목록(외부 API) — configured = 키가 있음, error = 목록을 못 받음(그때는 직접 넣는 칸으로) */
   campaigns: { configured: null, list: [], error: '', loadedAt: 0 },
-  /** 고른 캠페인의 계정·업로드폼을 가져오는 중 */
-  campaignLoading: false,
   /** Kglowing API 키 상태 { configured, hint(끝 네 글자), fromEnv } — 오른쪽 위 버튼 */
   externalApi: {},
 };
@@ -158,7 +156,9 @@ async function saveNow(draft = state.draft) {
 // ── 폼 ──────────────────────────────────────────────────────────────────────
 
 /**
- * 지금 폼 값. uploadUrl·accountId 는 **쓰일 값**이다 — 캠페인에 있으면 캠페인 것, 없으면 직접 넣은 것.
+ * 지금 폼 값. uploadUrl·accountId 는 **쓰일 값**이다.
+ * - accountId: 캠페인에 있으면 캠페인 것, 없으면 직접 넣은 것.
+ * - uploadUrl: **늘 직접 넣은 것**(2026-10-12 사용자 지시 — 캠페인 메일에서 찾아 자동으로 채우지 않는다).
  * 직접 넣은 값은 manual* 로 따로 둔다(캠페인을 바꿨을 때 앞 캠페인 값이 칸에 남지 않게).
  */
 function readForm() {
@@ -169,7 +169,7 @@ function readForm() {
   v.manualUploadUrl = $(MANUAL.uploadUrl).value.trim();
   // 계정 여러 개 — 'a, @b'. 방금 띄운 빈 자리는 뺀다.
   v.manualAccountId = accountValue($(MANUAL.accountId).value);
-  v.uploadUrl = c?.uploadUrl || v.manualUploadUrl;
+  v.uploadUrl = v.manualUploadUrl;
   v.accountId = c?.accountId || v.manualAccountId;
   return v;
 }
@@ -178,7 +178,8 @@ function fillForm(inputs) {
   for (const [k, id] of Object.entries(FIELDS)) $(id).value = inputs?.[k] ?? '';
   // 예전 초안(캠페인 고르기 전)은 uploadUrl·accountId 가 곧 직접 넣은 값이다.
   const old = !inputs?.campaign;
-  $(MANUAL.uploadUrl).value = inputs?.manualUploadUrl ?? (old ? inputs?.uploadUrl ?? '' : '');
+  // 자동으로 채우던 때의 초안·아카이브는 그때 쓴 링크를 칸에 보여 준다(보이는 칸이라 확인하고 고칠 수 있다).
+  $(MANUAL.uploadUrl).value = inputs?.manualUploadUrl || (old ? inputs?.uploadUrl ?? '' : inputs?.campaign?.uploadUrl ?? '');
   $(MANUAL.accountId).value = inputs?.manualAccountId ?? (old ? inputs?.accountId ?? '' : '');
   renderCampaign();
 }
@@ -257,7 +258,7 @@ function refreshFormState() {
 
   const reading = [...state.sources.values()].some((s) => s.status === 'reading' && state.draft.sourceIds.includes(s.id));
   // 필수 칸이 비어 있어도 버튼은 눌린다 — 누르면 빈 칸이 번쩍인다(「필수: …」 문구는 두지 않는다).
-  $('generate_btn').disabled = state.busy || reading || !!state.importJob || state.campaignLoading;
+  $('generate_btn').disabled = state.busy || reading || !!state.importJob;
   if (state.busy || state.importJob) return;
   // 주소 형식 같은 잘못은 빈 칸이 남아 있어도 알린다. 빈 필수 칸은 문구 없이 빨간 별(누르면 번쩍임)로만.
   if (bad.length) setStatus('form_status', `확인해 주세요: ${bad.join(', ')}`, 'bad');
@@ -278,7 +279,6 @@ function onFormInput(e) {
 // ── 캠페인 ──────────────────────────────────────────────────────────────────
 
 let picker = null;
-let pickSeq = 0;
 
 function kvRow(k, v) {
   const dt = document.createElement('dt');
@@ -290,10 +290,10 @@ function kvRow(k, v) {
 }
 
 /**
- * 캠페인 칸과, 캠페인에 없는 값만 직접 넣는 칸을 지금 상태대로 그린다.
+ * 캠페인 칸과 직접 넣는 칸을 지금 상태대로 그린다.
  * - 목록을 불러오는 중: 직접 넣는 칸은 숨긴다(깜빡이지 않게).
- * - 캠페인을 쓸 수 있음: 고른 캠페인에 업로드폼·계정이 없을 때만 그 칸이 보인다.
- * - 키가 없거나 목록을 못 받음: 예전처럼 직접 넣는다.
+ * - 업로드폼 링크는 늘 직접 넣는다(캠페인에서 가져오지 않는다).
+ * - 계정: 캠페인을 쓸 수 있으면 고른 캠페인에 계정이 없을 때만 칸이 보인다. 키가 없거나 목록을 못 받으면 예전처럼 직접 넣는다.
  */
 function renderCampaign() {
   if (!picker || !state.draft) return;
@@ -313,34 +313,16 @@ function renderCampaign() {
   hint.textContent = api.configured === false
     ? '캠페인 목록을 쓰려면 오른쪽 위 [Kglowing API] 에 관리자에게 받은 키를 넣어 주세요. 그동안은 아래 칸에 직접 넣어 주세요.'
     : api.error ? `${api.error} 그동안은 아래 칸에 직접 넣어 주세요.`
-      : '고르면 Account ID 와 업로드폼 링크를 캠페인 정보에서 가져옵니다.';
+      : '고르면 Account ID 를 캠페인 정보에서 가져옵니다. 업로드폼 링크는 아래에 직접 넣어 주세요.';
 
   const info = $('campaign_info');
-  if (c) {
-    let form;
-    if (state.campaignLoading) form = '캠페인 메일에서 찾는 중…';
-    else if (c.uploadUrl) {
-      form = document.createElement('a');
-      form.href = c.uploadUrl;
-      form.target = '_blank';
-      form.rel = 'noopener noreferrer';
-      form.textContent = c.uploadUrl;
-    } else form = '못 찾음 — 아래에 직접 넣어 주세요';
-    info.replaceChildren(
-      ...kvRow('Account ID', c.accountId ? accountTag(c.accountId) : '없음 — 아래에 직접 넣어 주세요'),
-      ...kvRow('업로드폼', form),
-    );
-  }
+  if (c) info.replaceChildren(...kvRow('Account ID', c.accountId ? accountTag(c.accountId) : '없음 — 아래에 직접 넣어 주세요'));
   info.classList.toggle('hidden', !c);
 
   const fallback = !loading && !mode;
-  const showUpload = !state.campaignLoading && (fallback ? !c?.uploadUrl : !!c && !c.uploadUrl);
-  const showAccount = !state.campaignLoading && (fallback ? !c?.accountId : !!c && !c.accountId);
-  $('f_upload_group').classList.toggle('hidden', !showUpload);
+  const showAccount = fallback ? !c?.accountId : !!c && !c.accountId;
+  $('f_upload_group').classList.toggle('hidden', loading);
   $('f_account_group').classList.toggle('hidden', !showAccount);
-  $('f_upload_hint').textContent = c
-    ? `${c.uploadNote || '이 캠페인에서 업로드폼 링크를 찾지 못했습니다'} — 직접 넣어 주세요. 「submit your video URL here」에 걸립니다.`
-    : '크리에이터가 영상 주소를 제출할 폼 — 「submit your video URL here」에 걸립니다.';
   $('f_account_hint').textContent = c
     ? '이 캠페인 정보에 계정이 없습니다 — 직접 넣어 주세요. 계정이 여러 개면 띄어쓰기를 누르고 이어서 쓰세요.'
     : 'Account Tag 에 그대로 들어갑니다. 계정이 여러 개면 띄어쓰기를 누르고 이어서 쓰세요 — @ID1, @ID2 로 들어갑니다.';
@@ -362,38 +344,25 @@ async function loadCampaigns({ fresh = false } = {}) {
   paintKglowing(); // 키가 있는데 목록을 못 받았으면 버튼에 알린다
 }
 
-/** 캠페인을 골랐다 — 목록에 있는 계정은 바로, 업로드폼은 캠페인 메일을 읽어 채운다. */
-async function pickCampaign(c) {
+/**
+ * 캠페인을 골랐다 — 계정은 목록에 있는 것을 바로 쓴다. 업로드폼 링크는 채우지 않는다(직접 넣는다 — 2026-10-12 사용자 지시.
+ * 예전엔 캠페인 메일 템플릿에서 찾아 채웠다: 서버 `/api/campaigns/:id`·`kglowing.js findUploadForm` 은 남아 있지만 화면은 안 쓴다).
+ */
+function pickCampaign(c) {
   if (state.busy || state.importJob) {
     toast('지금 하는 작업이 끝난 뒤에 바꿔 주세요');
     return;
   }
-  const seq = ++pickSeq;
-  const snap = (x) => ({
-    id: x.id,
-    title: x.title,
-    brand: x.brand,
-    status: x.status,
-    snsType: x.snsType,
-    managedYearMonth: x.managedYearMonth,
-    accountId: x.accountId ?? '',
-    uploadUrl: x.uploadUrl ?? '',
-    uploadNote: x.uploadNote ?? '',
-  });
-  state.draft.inputs = { ...state.draft.inputs, campaign: snap(c) };
-  state.campaignLoading = true;
-  renderCampaign();
-  refreshFormState();
-  try {
-    const { campaign } = await api('GET', `/api/campaigns/${c.id}`);
-    if (seq !== pickSeq) return;
-    state.draft.inputs.campaign = snap(campaign);
-  } catch (e) {
-    if (seq !== pickSeq) return;
-    state.draft.inputs.campaign.uploadNote = `캠페인 정보를 가져오지 못했습니다(${e.message})`;
-  } finally {
-    if (seq === pickSeq) state.campaignLoading = false;
-  }
+  const campaign = {
+    id: c.id,
+    title: c.title,
+    brand: c.brand,
+    status: c.status,
+    snsType: c.snsType,
+    managedYearMonth: c.managedYearMonth,
+    accountId: c.accountId ?? '',
+  };
+  state.draft.inputs = { ...state.draft.inputs, campaign };
   state.draft.inputs = readForm();
   renderCampaign();
   refreshFormState();
