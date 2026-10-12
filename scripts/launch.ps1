@@ -49,6 +49,22 @@ function Stop-App {
 }
 
 if ($Stop)    { Stop-App; return }
+
+# 바로가기 아이콘 — 예전 설치본의 바로가기는 윈도우 기본 아이콘(노트 모양)이다. 자동 업데이트로 받은 PC 도
+# 앱 아이콘으로 바뀌게 켤 때마다 맞춘다. 이 사본을 가리키는 바로가기만 건드리고, 안 되면 그냥 넘어간다.
+$ico = Join-Path $Root 'scripts\app.ico'
+if (Test-Path $ico) {
+  try {
+    $sh = New-Object -ComObject WScript.Shell
+    foreach ($lp in @((Join-Path ([Environment]::GetFolderPath('Desktop')) 'Content Brief Studio.lnk'),
+                      (Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs\Content Brief Studio.lnk'))) {
+      if (-not (Test-Path $lp)) { continue }
+      $l = $sh.CreateShortcut($lp)
+      if ($l.Arguments -like "*$Root\scripts\app.vbs*" -and $l.IconLocation -ne "$ico,0") { $l.IconLocation = "$ico,0"; $l.Save() }
+    }
+  } catch {}
+}
+
 if ($Restart) { Stop-App; Start-Sleep -Seconds 2 }
 
 if (Test-Up) {

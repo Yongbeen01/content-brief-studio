@@ -36,6 +36,8 @@ OAuth 연결 자체를 확인할 때만 설치본을 멈추고 4325 로 띄운�
 - `scripts/*.bat` 은 ASCII 만, CRLF. 인터넷에서 받은 .bat 은 Zone.Identifier 를 지우는 줄이 있어야 PowerShell 을 띄운다.
 - `scripts/install.ps1` 은 **BOM 없이**(irm | iex 가 BOM 을 명령으로 읽는다).
 - `-File` 로 실행하는 `.ps1`(launch, install-shortcut)은 **UTF-8 BOM 필수**(PowerShell 5.1 이 한글을 깨뜨린다).
+- 바로가기 아이콘은 `scripts/app.ico`(파란 바탕 클래퍼보드, 16~256px PNG 를 담은 ico — `*.ico binary`). 예전 설치본 바로가기는
+  윈도우 기본 아이콘(`shell32.dll,70`, 노트 모양)이라 `launch.ps1` 이 켤 때마다 **이 사본을 가리키는 바로가기만** 앱 아이콘으로 맞춘다.
 - `claude` 에 넘기는 경로는 슬래시로, argv 에 줄바꿈 금지(시스템 프롬프트는 파일로).
 
 ## 구조

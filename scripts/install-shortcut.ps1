@@ -23,7 +23,9 @@ foreach ($t in $targets) {
   $lnk.Arguments        = "`"$Root\scripts\app.vbs`""
   $lnk.WorkingDirectory = $Root
   $lnk.Description      = 'TikTok 크리에이터 영상 가이드를 만들고 노션에 올리는 도구'
-  $lnk.IconLocation     = "$env:SystemRoot\System32\shell32.dll,70"
+  # 앱 아이콘(클래퍼보드). 파일이 없으면 윈도우 기본 아이콘으로.
+  $ico = Join-Path $Root 'scripts\app.ico'
+  $lnk.IconLocation     = if (Test-Path $ico) { "$ico,0" } else { "$env:SystemRoot\System32\shell32.dll,70" }
   $lnk.Save()
   Write-Host "  만듦: $t"
 }
