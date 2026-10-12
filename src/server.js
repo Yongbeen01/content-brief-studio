@@ -18,7 +18,7 @@ import { prepareVideo } from './video/prepare.js';
 import { matchClip, stepSummary } from './video/match.js';
 import { makeClipAsset, makePreviews } from './video/clip.js';
 import { verifyPicks } from './video/verify.js';
-import { ensureScrub, parseRange } from './video/scrub.js';
+import { ensureScrub, ensureStrip, parseRange } from './video/scrub.js';
 import { toolsStatus } from './media/tools.js';
 import { runEdit, runInsert } from './brief/edit.js';
 import { runRevise } from './brief/revise.js';
@@ -260,6 +260,21 @@ async function handleApi(req, res, url) {
     });
     return pipeline(fs.createReadStream(file, range), res, () => {});
   }
+  // 컷 편집기 시퀀스 바에 까는 장면 사진 한 줄 — 칸 정보(JSON)와 사진. 없으면 여기서 만든다.
+  if (m === 'GET' && /^\/api\/videos\/[^/]+\/strip(\.jpg)?$/.test(p)) {
+    const id = p.split('/')[3];
+    if (!videos.getVideo(id)) return json(res, 404, { error: '영상을 찾지 못했습니다.' });
+    let meta;
+    try {
+      meta = await ensureStrip(id);
+    } catch (e) {
+      return json(res, 500, { error: String(e.message ?? e).slice(0, 300) });
+    }
+    if (p.endsWith('/strip')) return json(res, 200, { strip: { ...meta, src: `/api/videos/${id}/strip.jpg` } });
+    const data = fs.readFileSync(videos.stripPath(id).jpg);
+    res.writeHead(200, { 'content-type': 'image/jpeg', 'content-length': data.length, 'cache-control': 'private, max-age=600' });
+    return res.end(data);
+  }
   if (m === 'GET' && p === '/api/drafts/current') return json(res, 200, { draft: store.currentDraft() });
   if (m === 'GET' && p === '/api/drafts') return json(res, 200, { drafts: store.listDrafts() });
   if (m === 'GET' && p.startsWith('/api/drafts/')) return json(res, 200, { draft: store.loadDraft(p.split('/').pop()) });
@@ -365,8 +380,8 @@ async function handleApi(req, res, url) {
     const videoIds = (body.videoIds ?? []).filter((x) => typeof x === 'string');
     if (!videoIds.length) return json(res, 400, { error: '영상이 없습니다.' });
     const job = startJob('video-match', async ({ progress, signal, dir }) => {
-      // 컷 편집기가 돌려 볼 탐색용 영상 — Claude 를 기다리는 동안 같이 만들어 둔다(못 만들어도 창을 열 때 다시 만든다)
-      const scrubs = videoIds.map((id) => ensureScrub(id).catch(() => null));
+      // 컷 편집기가 돌려 볼 탐색용 영상·바에 깔 장면 사진 — Claude 를 기다리는 동안 같이 만들어 둔다(못 만들어도 창을 열 때 다시 만든다)
+      const scrubs = videoIds.flatMap((id) => [ensureScrub(id).catch(() => null), ensureStrip(id).catch(() => null)]);
       const found = await matchClip({
         videoIds, doc: body.doc, path: body.path, jobDir: dir, onProgress: progress, signal,
       });

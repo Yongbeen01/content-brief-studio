@@ -11,6 +11,7 @@ import { DIRS, config, ensureDirs } from '../config.js';
  *   sheets/    프레임 격자 · frames.json  화면 설명(영상당 한 번, 영구 재사용)
  *   speech.json  받아쓰기 · cuts.json  장면이 바뀌는 시각 · previews/  후보 미리보기 mp4
  *   scrub.mp4  컷 편집기에서 돌려 보는 탐색용 영상(소리 없음, 키프레임 촘촘히 — scrub.js)
+ *   strip.jpg · strip.json  컷 편집기 시퀀스 바에 까는 장면 사진 한 줄과 그 칸 정보(scrub.js)
  *   (frames.json 을 만든 방식은 meta 의 describeVersion — 방식이 바뀌면 다시 읽는다)
  *
  * **frames.json 이 이 기능의 비용 설계다** — 같은 영상으로 GIF 를 여러 개 만들어도 화면 설명은 한 번만 만든다.
@@ -27,6 +28,9 @@ export const videoDir = (id) => (safeId(id) ? dirOf(id) : '');
 export const sourcePath = (id) => path.join(dirOf(id), 'source.mp4');
 export const sheetsDir = (id) => path.join(dirOf(id), 'sheets');
 export const scrubPath = (id) => (safeId(id) ? path.join(dirOf(id), 'scrub.mp4') : '');
+export const stripPath = (id) => (safeId(id)
+  ? { jpg: path.join(dirOf(id), 'strip.jpg'), json: path.join(dirOf(id), 'strip.json') }
+  : { jpg: '', json: '' });
 /** 미리보기 이름: 실행 표시 3자 + 한 구간짜리는 s1·s2·s3, 이어 붙인 것은 seq (예: k3xs1·k3xseq — clip.js). */
 export const previewPath = (id, name) => (/^[a-z0-9]{1,6}$/.test(String(name))
   ? path.join(dirOf(id), 'previews', `${name}.mp4`)

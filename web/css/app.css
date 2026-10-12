@@ -692,7 +692,8 @@ details.card[open] > summary .fx-chevron { transform: rotate(180deg); }
 .vp-manual span { color: var(--fx-text-weaker); font-size: 0.8rem; }
 
 /* 구간 고르기 창 — 위는 추천 후보 3개(나란히), 아래는 직접 컷 편집(cut-editor.js) */
-.fx-modal.clip-dialog { max-width: 1000px; max-height: min(94vh, 1040px); }
+/* 창 폭 = 예전 1000px + 오른쪽 미리보기(영상 비율, cut-editor.js 가 --ce-stage-w 로 알린다) + 사이 14px — 바 폭은 예전 그대로 950px */
+.fx-modal.clip-dialog { max-width: calc(1014px + var(--ce-stage-w, 169px)); max-height: min(96vh, 1040px); }
 .clip-sec { font-size: 0.82rem; font-weight: 600; color: var(--fx-text-weak); margin-bottom: -4px; }
 .clip-sec span { font-weight: 400; color: var(--fx-text-weaker); }
 .clip-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: stretch; }
@@ -702,7 +703,8 @@ details.card[open] > summary .fx-chevron { transform: rotate(180deg); }
   border-radius: var(--fx-r-sm); padding: 8px;
 }
 .clip-cand:hover { border-color: var(--fx-blue); }
-.clip-cand video { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #000; border-radius: 6px; }
+/* 높이는 창이 넓어지기 전 16:9 높이 그대로 — 넓어진 만큼 카드가 길어져 바가 아래로 밀리지 않게 */
+.clip-cand video { width: 100%; height: 169px; object-fit: contain; background: #000; border-radius: 6px; }
 /* 가장 유력한 후보는 진하게(파란 칸) */
 .clip-cand.is-top { border: 2px solid var(--fx-blue); background: var(--fx-blue-weakest); padding: 7px; }
 .clip-top { align-self: flex-start; font-size: 0.7rem !important; font-weight: 700; color: #fff !important; background: var(--fx-blue);
@@ -729,12 +731,13 @@ details.card[open] > summary .fx-chevron { transform: rotate(180deg); }
 .ce-head b { font-size: 0.88rem; }
 .ce-hint { font-size: 0.76rem; color: var(--fx-text-weaker); }
 .ce-top { display: flex; gap: 14px; align-items: flex-start; }
-.ce-stage { position: relative; flex: none; width: 170px; height: 300px; background: #000; border-radius: 6px; overflow: hidden; }
+.ce-stage { position: relative; flex: none; width: 169px; height: 300px; background: #000; border-radius: 6px; overflow: hidden; }
 .ce-stage video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: none; }
 .ce-stage video.on { display: block; }
 .ce-stage-msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 1;
   color: rgba(255, 255, 255, 0.75); font-size: 0.8rem; text-align: center; padding: 10px; }
-.ce-side { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+/* 왼쪽 열: 썸네일 → 재생 줄 → 시퀀스 바 → 합계·GIF (오른쪽은 미리보기) */
+.ce-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
 .ce-label { font-size: 0.78rem; font-weight: 600; color: var(--fx-text-weak); }
 .ce-thumbs { display: flex; flex-wrap: wrap; gap: 8px; }
 .ce-thumb { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; width: 72px; padding: 3px;
@@ -749,15 +752,6 @@ details.card[open] > summary .fx-chevron { transform: rotate(180deg); }
   box-shadow: 0 0 0 2px #fff; }
 .ce-thumb-name { font-size: 0.76rem; font-weight: 600; color: var(--fx-text); }
 .ce-thumb-sub { font-size: 0.68rem; color: var(--fx-text-weaker); }
-.ce-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; max-height: 150px; overflow-y: auto; }
-.ce-list li { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; font-size: 0.8rem; cursor: pointer;
-  font-variant-numeric: tabular-nums; }
-.ce-list li:hover { background: var(--fx-fill); }
-.ce-list li b { min-width: 18px; height: 18px; border-radius: 9px; background: var(--fx-blue-weaker); color: var(--fx-blue-hover);
-  font-size: 0.7rem; display: flex; align-items: center; justify-content: center; }
-.ce-list li em { font-style: normal; color: var(--fx-text-weaker); }
-.ce-list li.ce-list-empty { cursor: default; color: var(--fx-text-weaker); }
-.ce-list li.ce-list-empty:hover { background: none; }
 .ce-transport { display: flex; align-items: center; gap: 10px; font-size: 0.8rem; }
 .ce-play { flex: none; width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--fx-input-stroke); background: var(--fx-card);
   cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; }
@@ -780,15 +774,20 @@ details.card[open] > summary .fx-chevron { transform: rotate(180deg); }
 .ce-tick.start { height: 22px; background: var(--fx-text-weak); }
 .ce-tick span.name { bottom: 6px; left: 4px; font-weight: 700; color: var(--fx-text); }
 .ce-seg { position: absolute; top: 24px; height: 48px; background: var(--fx-fill); border-radius: 4px; box-shadow: inset 0 0 0 1px var(--fx-input-stroke); }
-.ce-range { position: absolute; top: 24px; height: 48px; box-sizing: border-box; cursor: ew-resize;
-  border-top: 2px solid var(--fx-blue); border-bottom: 2px solid var(--fx-blue); background: rgba(2, 99, 224, 0.2); }
+/* 장면 사진 — 고른 구간 밖은 어둡게, 구간 안은 밝게(.ce-range 의 backdrop-filter 가 되살린다) */
+.ce-strip { position: absolute; inset: 1px; overflow: hidden; border-radius: 3px; pointer-events: none; filter: brightness(0.55) saturate(0.85); }
+.ce-frame { position: absolute; top: 0; bottom: 0; background-image: var(--strip); background-repeat: no-repeat; }
+.ce-range { position: absolute; top: 24px; height: 48px; box-sizing: border-box; cursor: grab;
+  border-top: 2px solid var(--fx-blue); border-bottom: 2px solid var(--fx-blue); background: rgba(2, 99, 224, 0.12);
+  backdrop-filter: brightness(1.8) saturate(1.15); }
+.ce-range.is-move { cursor: grabbing; }
 .ce-handle { position: absolute; top: -2px; bottom: -2px; width: 10px; background: var(--fx-blue); cursor: col-resize; }
 .ce-handle.l { left: -10px; border-radius: 4px 0 0 4px; }
 .ce-handle.r { right: -10px; border-radius: 0 4px 4px 0; }
 .ce-handle::after { content: ''; position: absolute; top: 50%; left: 4px; width: 2px; height: 14px; margin-top: -7px; background: rgba(255, 255, 255, 0.85); border-radius: 1px; }
-.ce-range.is-drag { background: rgba(2, 99, 224, 0.28); }
+.ce-range.is-drag { background: rgba(2, 99, 224, 0.2); }
 /* 0초 — 놓으면 구간 선택 취소 */
-.ce-range.zero { border-color: var(--fx-error); background: rgba(219, 19, 42, 0.18); }
+.ce-range.zero { border-color: var(--fx-error); background: rgba(219, 19, 42, 0.25); }
 .ce-range.zero .ce-handle { background: var(--fx-error); }
 .ce-playhead { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px solid var(--fx-text); margin-left: -1px; pointer-events: none; z-index: 3; }
 .ce-playhead-knob { position: absolute; top: 0; left: -7px; width: 12px; height: 14px; background: var(--fx-text); pointer-events: auto; cursor: ew-resize;

@@ -8,7 +8,7 @@ import path from 'node:path';
 process.env.CBS_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'cbs-cut-'));
 
 const {
-  addAt, dragEdge, edgeLimits, fromParts, gapAt, globalOf, layout, locate, normalize, partsOf, tickStep, toggleVideo, totalOf,
+  addAt, dragEdge, edgeLimits, fromParts, gapAt, globalOf, layout, locate, moveRange, normalize, partsOf, tickStep, toggleVideo, totalOf,
 } = await import('../web/js/cut-ranges.js');
 const { parseRange } = await import('../src/video/scrub.js');
 
@@ -46,6 +46,18 @@ test('끝 조절 — 옆 구간·반대쪽 끝을 못 넘고, 닿으면 0초(구
   assert.deepEqual(dragEdge(list, 0, 'end', 0.2, 10), { range: { start: 1, end: 1 }, zero: true }, '반대쪽 끝에 붙으면 0초');
   assert.deepEqual(dragEdge(list, 1, 'start', 9, 10), { range: { start: 7, end: 7 }, zero: true });
   assert.deepEqual(dragEdge(list, 1, 'end', 30, 10).range, { start: 5, end: 10 }, '영상 끝까지만');
+});
+
+test('구간 옮기기 — 길이 그대로, 옆 구간·영상 처음과 끝에서 멈춘다', () => {
+  const list = [{ start: 1, end: 3 }, { start: 5, end: 6.5 }, { start: 8, end: 9 }];
+  assert.deepEqual(moveRange(list, 1, 5.84, 10), { start: 5.8, end: 7.3 });
+  assert.deepEqual(moveRange(list, 1, 2, 10), { start: 3, end: 4.5 }, '앞 구간 끝에서 멈춘다');
+  assert.deepEqual(moveRange(list, 1, 7.9, 10), { start: 6.5, end: 8 }, '뒤 구간 시작에서 멈춘다');
+  assert.deepEqual(moveRange(list, 0, -4, 10), { start: 0, end: 2 }, '영상 처음');
+  assert.deepEqual(moveRange(list, 2, 9.6, 10), { start: 9, end: 10 }, '영상 끝');
+  // 소수 길이가 옮기다 흔들리지 않는다
+  const r = moveRange([{ start: 0.3, end: 1.6 }], 0, 4.47, 10);
+  assert.equal(Math.round((r.end - r.start) * 10), 13);
 });
 
 test('영상 넣고 빼기 — 누른 순서대로 붙고, 뺐다 다시 넣어도 전에 고른 구간이 그대로', () => {

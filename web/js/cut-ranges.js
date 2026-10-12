@@ -87,6 +87,16 @@ export function dragEdge(list, i, side, t, dur) {
 
 export const isZero = (r) => !(r.end - r.start >= ZERO);
 
+/** 파란 구간을 잡고 끌었다 — 길이 그대로 start 로 옮긴다. 옆 구간·영상 처음과 끝을 넘지 못한다. */
+export function moveRange(list, i, start, dur) {
+  const r = list[i];
+  const len = q(r.end - r.start);
+  const min = i > 0 ? list[i - 1].end : 0;
+  const max = (i < list.length - 1 ? list[i + 1].start : limit(dur)) - len;
+  const s = q(clamp(start, min, Math.max(min, max)));
+  return { start: s, end: q(s + len) };
+}
+
 /** 이어 붙일 조각 — order 순서대로, 영상 안에서는 시간 순. */
 export function partsOf(cut) {
   return (cut?.order ?? []).flatMap((videoId) => (cut.ranges?.[videoId] ?? [])

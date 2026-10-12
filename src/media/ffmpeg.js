@@ -133,6 +133,19 @@ export async function scrubMp4(src, dest, opts = {}) {
 }
 
 /**
+ * 필름스트립 — 1초에 fps 장을 높이 height 로 줄여 가로 한 줄(columns 칸)로 붙인 JPEG 한 장.
+ * 장면이 칸보다 적으면 남는 칸은 검정으로 채워 나온다(tile 이 마지막 묶음도 내보낸다).
+ */
+export async function filmstrip(src, dest, { fps = 2, height = 64, columns, ...opts }) {
+  const { ffmpeg } = await tools(opts);
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  await run(ffmpeg, [
+    '-y', '-i', src, '-an', '-vf', `fps=${fps},scale=-2:${height},tile=${columns}x1`, '-frames:v', '1', '-q:v', '5', dest,
+  ], opts);
+  return dest;
+}
+
+/**
  * 여러 구간을 하나로 이어 붙인다 — 다른 영상에서 가져온 조각이어도 된다.
  *
  * 조각마다 **크기·fps 를 먼저 맞춘 뒤** 이어 붙인다. 필터 하나로 한 번에 묶으면 크기가 다른 영상에서

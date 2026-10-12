@@ -385,6 +385,7 @@ export function createVideoPanel({ root, getDoc, getDraftId, commit, toast, onRe
       videos: job.videos,
       cut: job.cut,
       scrubUrl: (id) => `/api/videos/${id}/scrub`,
+      stripUrl: (id) => `/api/videos/${id}/strip`,
       onChange: (cut) => { job.cut = cut; },
       onMake: (parts) => makeGif(nodeId, parts),
     });
