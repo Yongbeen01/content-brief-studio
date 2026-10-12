@@ -117,15 +117,22 @@
             <div class="fx-prefix" id="f_account_wrap"><span>@</span><input type="text" id="f_account" autocomplete="off" spellcheck="false" placeholder="clerivy.global"></div>
           </div>
 
+          <!-- 사측 공유 파일은 선택이다(2026-10-12) — 없이 [생성]을 누르면 확인 창(#nosrc_dialog)을 띄운다 -->
           <div class="form-group">
-            <label for="f_notion" class="fx-required-label" data-req="sources">사측 공유 파일</label>
-            <p class="form-hint">브랜드가 준 자료 — pdf·pptx·docx·xlsx 파일 또는 노션 링크. 제품 설명·해시태그·장면·Do's 를 여기서 찾습니다. 이미 만든 브리프를 고치려면 위 [기존 브리프 업로드]로.</p>
+            <label for="f_notion">사측 공유 파일 <span class="opt">(선택)</span></label>
+            <p class="form-hint">브랜드가 준 자료 — pdf·pptx·docx·xlsx 파일 또는 노션 링크. 제품 설명·해시태그·장면·Do's 를 여기서 찾습니다. <b>아마존 상세페이지 링크</b>를 넣으면 상품 정보(특징·성분·사용법·상세 이미지)만 골라 PDF 로 만들어 씁니다. 이미 만든 브리프를 고치려면 위 [기존 브리프 업로드]로.</p>
             <div class="fx-attach">
               <button type="button" class="fx-attach-btn" id="f_attach_btn">첨부파일</button>
-              <input type="text" id="f_notion" autocomplete="off" placeholder="노션 링크를 붙여넣고 Enter">
+              <input type="text" id="f_notion" autocomplete="off" placeholder="노션·아마존 링크를 붙여넣고 Enter">
             </div>
             <input type="file" id="f_files" class="fx-hidden-file" multiple accept=".pdf,.pptx,.docx,.xlsx">
             <div class="fx-attach-list" id="f_sources"></div>
+          </div>
+
+          <div class="form-group">
+            <label for="f_product_info">제품 정보 <span class="opt">(선택)</span></label>
+            <p class="form-hint">사측 공유 파일이 없거나 부족할 때 — 제품명·성분·사용법·용량·주의사항처럼 기획서에 들어갈 사실을 적어 주세요. 자료와 같이 씁니다.</p>
+            <textarea id="f_product_info" placeholder="예) 마이크로다트 스팟 패치 12매 + 클리어링 패드 12매. 패드로 닦고 패치를 10초 눌러 붙인 뒤 2시간 이상(가능하면 밤새) 둔다."></textarea>
           </div>
 
           <div class="form-group">
@@ -304,6 +311,22 @@
       <div class="fx-overlay-actions">
         <button type="button" class="secondary-btn" data-close id="publish_cancel">취소</button>
         <button type="button" class="primary-btn" id="publish_go"><span class="btn-text">노션에 만들기</span><span class="loader"></span></button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 사측 공유 파일 없이 [생성]을 눌렀을 때 — 무엇이 비게 되는지 알리고 그래도 만들지 묻는다(main.js confirmNoSources) -->
+  <dialog class="fx-overlay fx-modal" id="nosrc_dialog">
+    <div class="fx-overlay-head">사측 공유 파일 없이 만들까요? <span class="fx-spacer"></span>
+      <button type="button" class="fx-overlay-close" data-close aria-label="닫기"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    </div>
+    <div class="fx-overlay-body">
+      <p class="fx-help" id="nosrc_text"></p>
+    </div>
+    <div class="fx-overlay-foot">
+      <div class="fx-overlay-actions">
+        <button type="button" class="secondary-btn" data-close>취소</button>
+        <button type="button" class="primary-btn" id="nosrc_ok">그래도 만들기</button>
       </div>
     </div>
   </dialog>

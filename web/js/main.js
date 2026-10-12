@@ -28,7 +28,7 @@ const DEFAULT_PARENT = '3d439fd7477e80058995edf04a5d1586';
  * 캠페인에 그 값이 없을 때만 직접 넣는 칸(MANUAL)이 보인다.
  */
 const FIELDS = {
-  tiktokUrl: 'f_tiktok', amazonUrl: 'f_amazon', sellingPoints: 'f_points', concept: 'f_concept',
+  tiktokUrl: 'f_tiktok', amazonUrl: 'f_amazon', productInfo: 'f_product_info', sellingPoints: 'f_points', concept: 'f_concept',
 };
 const MANUAL = { uploadUrl: 'f_upload', accountId: 'f_account' };
 const LABEL = {
@@ -195,7 +195,7 @@ function formProblems(v) {
   if (campaignMode() && !v.campaign) missing.push('campaign');
   if (!v.uploadUrl) missing.push('uploadUrl');
   if (!v.accountId) missing.push('accountId');
-  if (!readySources().length) missing.push('sources');
+  // 사측 공유 파일은 선택 — 없으면 [생성]을 눌렀을 때 확인 창이 뜬다(confirmNoSources)
   for (const k of ['sellingPoints', 'concept']) if (!String(v[k] ?? '').trim()) missing.push(k);
   const bad = [];
   for (const k of ['uploadUrl', 'tiktokUrl', 'amazonUrl']) if (v[k].trim() && !isUrl(v[k].trim())) bad.push(`${LABEL[k]} 주소 형식`);
@@ -498,10 +498,13 @@ function renderSources() {
     const kind = document.createElement('span');
     kind.className = 'fx-attach-kind';
     kind.textContent = KIND_LABEL[s.kind] ?? s.kind;
-    const name = document.createElement('span');
+    // 다 읽은 PDF 는 눌러서 새 탭으로 열어 본다 — 아마존에서 만든 PDF 에 무엇이 들어갔는지 확인할 수 있게
+    const openable = s.kind === 'pdf' && s.status === 'ready';
+    const name = document.createElement(openable ? 'a' : 'span');
     name.className = 'fx-attach-name';
     name.textContent = s.name;
-    name.title = s.name;
+    name.title = openable ? `${s.name} — 눌러서 열기` : s.name;
+    if (openable) Object.assign(name, { href: `/api/sources/${s.id}/file`, target: '_blank', rel: 'noopener' });
     const note = document.createElement('span');
     note.className = 'fx-attach-note';
     note.textContent = s.status === 'reading' ? '읽는 중…'
@@ -559,12 +562,23 @@ async function addFiles(files) {
   }
 }
 
+/** 아마존 상세페이지 주소인가(짧은 주소 a.co·amzn.to 포함) — 서버 sources/amazon.js isAmazonUrl 과 같은 기준. */
+const isAmazonLink = (url) => {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return /(^|\.)amazon\.[a-z.]+$/.test(host) || /^(a\.co|amzn\.(to|com|eu|asia))$/.test(host);
+  } catch {
+    return false;
+  }
+};
+
+/** 링크 칸 — 노션 링크는 글로 읽고, 아마존 상세페이지 링크는 상품 정보만 골라 정리한 PDF 로 만든다. */
 async function addNotionLink() {
   const input = $('f_notion');
   const url = input.value.trim();
   if (!url) return;
   try {
-    const { source } = await api('POST', '/api/sources/notion', { url });
+    const { source } = await api('POST', isAmazonLink(url) ? '/api/sources/amazon' : '/api/sources/notion', { url });
     input.value = '';
     addSourceView(source);
   } catch (e) { toast(e.message, true); }
@@ -775,6 +789,28 @@ function setBusy(on) {
   if (was && !on && state.draft.doc) renderPreview();
 }
 
+/**
+ * 사측 공유 파일 없이 만들 때 — 무엇이 비게 되는지 알리고 그래도 만들지 묻는다(브라우저 confirm 대신 앱 창).
+ * 「제품 정보」 칸을 채웠으면 그 내용으로 쓴다고 말한다(제품 사진은 그래도 빈다 — 자료에서 꺼내 고르는 방식이라).
+ * @returns {Promise<boolean>}
+ */
+function confirmNoSources(inputs) {
+  const dlg = $('nosrc_dialog');
+  $('nosrc_text').textContent = String(inputs.productInfo ?? '').trim()
+    ? '사측 공유 파일 없이 「제품 정보」 칸 내용으로 만듭니다. 제품 사진은 회색 자리로 남고, 칸에 적지 않은 내용(사용법·성분 등)은 비거나 일반적인 내용이 됩니다. 그래도 만들까요?'
+    : '사측 공유 파일 없이 만들면 제품 설명·사용법·제품 사진이 비거나 일반적인 내용이 됩니다. 아마존 상세페이지 링크나 「제품 정보」 칸으로 채울 수도 있습니다. 그래도 만들까요?';
+  return new Promise((resolve) => {
+    let ok = false;
+    const onOk = () => { ok = true; dlg.close(); };
+    $('nosrc_ok').addEventListener('click', onOk, { once: true });
+    dlg.addEventListener('close', () => {
+      $('nosrc_ok').removeEventListener('click', onOk);
+      resolve(ok);
+    }, { once: true });
+    dlg.showModal();
+  });
+}
+
 async function generate() {
   if (state.busy) return;
   const inputs = readForm();
@@ -791,7 +827,10 @@ async function generate() {
     return;
   }
   // 다 되면 소리·윈도우 알림으로 알린다 — 누른 이 순간에 소리를 켜 두고, 처음이면 알림을 허용할지 묻는다.
+  // (확인 창을 거치면 사용자 동작이 끊기므로 묻기 전에 켠다)
   notice.prime();
+  const noSources = !readySources().length;
+  if (noSources && !(await confirmNoSources(inputs))) return;
   state.draft.inputs = inputs;
   const sourceIds = [...state.draft.sourceIds];
   // 이미 기획서를 만든 초안이면 결과는 새 초안으로 간다 — 앞의 기획서는 아카이브에 그대로 남는다.
@@ -808,7 +847,7 @@ async function generate() {
   const tick = setInterval(() => { $('progress_eta').textContent = fmtElapsed(Date.now() - started); }, 1000);
   try {
     const { jobId } = await api('POST', '/api/generate', {
-      inputs, sourceIds, draftId: forkId ?? state.draft.id, fromDraftId: state.draft.id,
+      inputs, sourceIds, draftId: forkId ?? state.draft.id, fromDraftId: state.draft.id, allowNoSources: noSources,
     });
     state.generateJob = jobId;
     const job = await pollJob(jobId, (j) => renderProgress(j, started));

@@ -219,6 +219,9 @@ input.is-invalid, textarea.is-invalid { border-color: var(--fx-error); }
 }
 .fx-attach-item .fx-attach-kind { flex: none; font-size: 0.72rem; font-weight: 600; color: var(--fx-text-weak); text-transform: uppercase; }
 .fx-attach-item .fx-attach-name { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 다 읽은 PDF 는 눌러서 열어 본다(아마존에서 만든 PDF 확인) */
+.fx-attach-item a.fx-attach-name { color: var(--fx-text); text-decoration: none; }
+.fx-attach-item a.fx-attach-name:hover { color: var(--fx-blue); text-decoration: underline; }
 .fx-attach-item .fx-attach-note { flex: none; color: var(--fx-text-weak); white-space: nowrap; max-width: 55%; overflow: hidden; text-overflow: ellipsis; }
 .fx-attach-item.busy .fx-attach-note { color: var(--fx-blue); }
 .fx-attach-item.bad .fx-attach-note { color: var(--fx-error); white-space: normal; }

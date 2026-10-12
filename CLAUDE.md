@@ -119,8 +119,13 @@ OAuth 연결 자체를 확인할 때만 설치본을 멈추고 4325 로 띄운�
 - **브리프 이름은 받지 않는다**: 작성 결과의 `titleProduct`·`titleConcept`(영어, 스키마 맨 끝 = 내용을 다 쓴 뒤)로
   `build.js briefTitle` 이 `[BRAND]US_TikTok_<제품> _<컨셉> Guide` 를 만든다. 고치는 곳은 [노션에 최종 생성] 창의 제목 칸뿐.
   예전 초안의 `inputs.briefName` 은 있으면 그대로 따른다.
-- **필수 칸**: 캠페인(목록을 쓸 수 있을 때)·업로드폼·Account ID·사측 공유 파일(서버도 막는다)·소구점·컨셉.
+- **필수 칸**: 캠페인(목록을 쓸 수 있을 때)·업로드폼·Account ID·소구점·컨셉.
   「필수: …」 문구는 없다 — 생성 버튼은 늘 눌리고, 누르면 빈 칸이 번쩍인다(`flashMissing`).
+- **사측 공유 파일은 선택**(2026-10-12 사용자 지시). 다만 없으면 제품 설명·사용법·제품 사진이 비거나 일반적인 내용이 되므로
+  [생성]을 누르면 앱 창(`#nosrc_dialog`, `main.js confirmNoSources`)으로 묻고, 「그래도 만들기」 를 눌러야 `allowNoSources` 를 붙여 보낸다
+  (서버도 이 표시 없이는 자료 없는 생성을 막는다). 자료 대신 쓸 길이 둘이다.
+  - **「제품 정보」 칸**(`inputs.productInfo`, 선택): 사람이 적은 사실 — 프롬프트에 「제품 정보 칸」 자료로 들어간다(`prompts.js sourcesBlock`).
+  - **아마존 상세페이지 링크**: 링크 칸에 넣으면 정리한 PDF 자료가 된다(아래 `src/sources/amazon.js`).
 - **비밀값은 화면 오른쪽 위에서 넣는다**(2026-09-29 사용자 지시 — 설치 파일에 담아 자동 등록하던 방식은 되돌렸다):
   노션 = [노션 설정] → 팀 설정 코드(CBS1, `npm run team-code`, 노션 정보만). Kglowing API = [Kglowing API] → X-API-KEY
   (`POST /api/external-api/key` → `kglowing.setKey`: 캠페인 한 건으로 확인한 뒤 config.json 에 저장, 틀린 키는 저장 안 함, 빈 값=지우기).
@@ -151,6 +156,20 @@ OAuth 연결 자체를 확인할 때만 설치본을 멈추고 4325 로 띄운�
 - `src/sources/` — 사측 공유 파일 읽기(docx·pptx·xlsx 는 의존성 없는 ZIP/XML 파서, PDF 는 Claude 가 직접 읽음, 노션 링크).
   사진도 같이 꺼낸다: `images.js`(추려내기)·`pdf-images.js`(PDF 안의 사진 객체 → JPEG 그대로 / PNG 로 다시 포장,
   투명도 `/SMask` 를 같이 넣지 않으면 오려낸 제품 컷 배경이 검게 나온다)·`imagemeta.js`(크기).
+  - **아마존 상세페이지 → 정리한 PDF**(`amazon.js` + `pdf-writer.js`, 2026-10-12): **브라우저를 띄우거나 조종하지 않는다** — kebiso(서버)로
+    옮길 수 있게 Node 내장 기능만 쓴다. HTML 을 그냥 받아(`lc-main=en_US` 쿠키 + `language=en_US` — 한국 IP 여도 영어 원문) 아마존이 칸마다
+    붙이는 `data-feature-name` 경계로 상품 정보 칸만 잘라 내고(상품명·한 줄 소개·브랜드·상품 정보 표·About this item·중요 정보(성분·사용법·주의)·
+    상품 설명·A+·브랜드 소개·세부 정보·사진), 그것으로 PDF 를 **직접** 만든다(Helvetica 기본 글꼴·WinAnsi — 라틴 문자만, JPEG 는 그대로 `/DCTDecode`).
+    가격·별점·순위·리뷰·스폰서 광고·관련 상품은 처음부터 안 담는다(경쟁사 상품명·문구가 섞이지 않게). 화면을 그대로 PDF 로 찍으면
+    5쪽 중 4쪽이 광고·추천·리뷰였고 「About this item」 은 접힌 칸이라 빠졌고 한국어 기계번역으로 나왔다 — HTML 에는 접힌 칸까지 다 있다.
+    A+ 의 PNG 는 아마존 이미지 서버 `_FMjpg_` 로 JPEG 를 받는다(`jpegUrl`, 확장자만 .jpg 로 바꾸면 404). 실측: 상품당 2~4초, 6~8쪽, 1~4MB.
+    그 뒤로는 올린 PDF 와 똑같다(`sources/index.js addAmazonLink` — `kind:'pdf'`, `origin:'amazon'`): Claude 가 직접 읽고, 안의 사진은
+    제품 사진 후보가 된다. 프롬프트는 아마존 PDF 가 있으면 `AMAZON_RULE` 을 붙인다 — 소매 판매 문구라 **사실만** 쓰고, 「100%」·「#1」 같은
+    판매 문구는 브랜드 자료·소구점에 같은 말이 없으면 대사에 넣지 않으며, 다르면 브랜드 자료가 앞선다. PDF 첫머리에도 같은 안내가 있다.
+    다 읽은 PDF 자료는 이름을 누르면 새 탭으로 열린다(`GET /api/sources/:id/file`) — 무엇이 들어갔는지 사람이 확인한다.
+    **kebiso 로 옮길 때**: 그대로 돈다. 다만 서버(데이터센터) IP 는 아마존이 로봇 확인으로 더 자주 막을 수 있다 — 막히면 같은
+    `parseProduct` 결과 모양(상품명·불릿·사진…)을 SP-API 상품 정보(Catalog Items: summaries·attributes(bullet_point)·images)로 채워
+    `buildProductPdf` 에 넘기면 된다(A+ 는 그 API 에 없다). 하니스 `pw-verify/run-amazon-source.sh`(진짜 아마존·진짜 Claude, `SKIP_GEN=1` 이면 생성 빼고).
 - `src/brief/` — 작성·보정·문서 트리·편집/추가. 제품 사진은 `product-image.js` 에서 **Claude 가 후보를 보고** 고른다
   (제일 큰 사진을 넣으면 십중팔구 배경 그라데이션이다). 글쓰기와 같이 돌려 기다림이 겹치지 않게 한다.
 - 고치는 길이 둘이다: 글자만 있는 자리는 `web/js/direct.js` 가 Claude 없이 바로(무엇을 직접 고칠 수 있는지는

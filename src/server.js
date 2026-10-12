@@ -213,6 +213,16 @@ async function handleApi(req, res, url) {
     const ids = String(url.searchParams.get('ids') ?? '').split(',').filter(Boolean);
     return json(res, 200, { sources: ids.map((id) => sources.publicView(sources.getSource(id))).filter(Boolean) });
   }
+  // 올린(또는 아마존에서 만든) PDF 를 새 탭에서 열어 본다 — 무엇이 Claude 에게 가는지 사람이 확인할 수 있게
+  if (m === 'GET' && /^\/api\/sources\/[^/]+\/file$/.test(p)) {
+    const id = p.split('/')[3];
+    const rec = sources.getSource(id);
+    const file = rec?.kind === 'pdf' ? sources.getSourceFile(id) : null;
+    if (!file || !fs.existsSync(file)) return json(res, 404, { error: '파일을 찾지 못했습니다.' });
+    const data = fs.readFileSync(file);
+    res.writeHead(200, { 'content-type': 'application/pdf', 'content-length': data.length, 'cache-control': 'private, max-age=60' });
+    return res.end(data);
+  }
   // 자료에서 꺼낸 사진 — 사진 자리를 눌렀을 때 고르는 목록에 보여 준다.
   if (m === 'GET' && /^\/api\/sources\/[^/]+\/images\/\d+$/.test(p)) {
     const [, , , id, , n] = p.split('/');
@@ -323,6 +333,11 @@ async function handleApi(req, res, url) {
     const body = await readJson(req);
     return json(res, 200, { source: sources.publicView(sources.addNotionLink(body.url, readers())) });
   }
+  // 아마존 상세페이지 링크 → 상품 정보만 골라 정리한 PDF(브라우저 없이 — sources/amazon.js)
+  if (m === 'POST' && p === '/api/sources/amazon') {
+    const body = await readJson(req);
+    return json(res, 200, { source: sources.publicView(sources.addAmazonLink(body.url)) });
+  }
   // 자료에서 꺼낸 사진을 문서에 쓰겠다 — 사진첩으로 복사한다(자료를 지워도 문서에는 남게).
   if (m === 'POST' && /^\/api\/sources\/[^/]+\/images\/\d+$/.test(p)) {
     const [, , , id, , n] = p.split('/');
@@ -424,9 +439,10 @@ async function handleApi(req, res, url) {
     const body = await readJson(req);
     const inputs = body.inputs ?? {};
     const sourceIds = body.sourceIds ?? [];
-    // 사측 공유 파일은 필수다 — 자료 없이 쓰면 제품 설명을 지어낼 수밖에 없다.
-    if (!sourceIds.some((id) => sources.getSource(id)?.status === 'ready')) {
-      return json(res, 400, { error: '사측 공유 파일을 하나 이상 넣어 주세요.' });
+    // 사측 공유 파일은 선택이다(2026-10-12) — 다만 없으면 제품 설명·사용법·제품 사진이 비거나 일반적인 내용이 되므로
+    // 화면이 확인을 받은 뒤에만(allowNoSources) 만든다. 「제품 정보」 칸에 적은 것은 자료처럼 쓴다.
+    if (!sourceIds.some((id) => sources.getSource(id)?.status === 'ready') && !body.allowNoSources) {
+      return json(res, 400, { error: '사측 공유 파일이 없습니다 — 화면에서 확인한 뒤 다시 눌러 주세요.' });
     }
     const started = Date.now();
     const job = startJob('generate', ({ progress, signal, dir }) => generateBrief({

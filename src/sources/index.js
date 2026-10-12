@@ -8,6 +8,7 @@ import { readXlsx } from './xlsx.js';
 import { extractImages, rankImages } from './images.js';
 import { ASSET_MIME } from '../store.js';
 import { extractPageId, isNotionUrl, readPublicNotion } from './notion-public.js';
+import { asinFromUrl, isAmazonUrl, readAmazon } from './amazon.js';
 
 /**
  * 사측 공유 파일 — 올리는 즉시 읽기 시작하고, 화면은 상태("읽는 중 / N자 / 실패 사유")를 본다.
@@ -44,8 +45,12 @@ function set(rec) {
 
 export function publicView(rec) {
   if (!rec) return null;
-  const { id, kind, name, size, status, chars, note, error, url, images } = rec;
-  return { id, kind, name, size, status, chars, note, error, url, images: images ?? [] };
+  const {
+    id, kind, origin, name, size, status, chars, note, error, url, images,
+  } = rec;
+  return {
+    id, kind, origin: origin ?? '', name, size, status, chars, note, error, url, images: images ?? [],
+  };
 }
 
 export function getSource(id) {
@@ -204,6 +209,46 @@ export function addNotionLink(url, readers = {}) {
     } catch (e) {
       const why = apiErr ? `${e.message} / 연결된 워크스페이스에서도 못 읽음: ${apiErr.message}` : e.message;
       set({ ...rec, status: 'error', error: String(why).slice(0, 300) });
+    }
+  })();
+  return rec;
+}
+
+/**
+ * 아마존 상세페이지 링크 → 정리한 PDF 를 만들어 PDF 자료로 둔다(amazon.js — 브라우저 없이).
+ * 그 뒤로는 올린 PDF 와 똑같다: 생성할 때 Claude 가 직접 읽고, 안의 사진은 제품 사진 후보가 된다.
+ * `origin: 'amazon'` 이 붙어 있어 프롬프트가 「소매 판매 문구 — 사실만 쓰고 브랜드 자료가 앞선다」고 따로 알린다.
+ * @param {{ read?: typeof readAmazon }} [o]  시험용으로 읽는 함수를 바꿀 수 있다
+ */
+export function addAmazonLink(url, { read = readAmazon } = {}) {
+  ensureDirs();
+  const clean = String(url ?? '').trim();
+  if (!isAmazonUrl(clean)) throw new Error('아마존 상품 주소가 아닙니다.');
+  const id = crypto.randomBytes(8).toString('hex');
+  const rec = set({
+    id, kind: 'pdf', origin: 'amazon', name: `Amazon 상세페이지 (${asinFromUrl(clean) || clean})`, url: clean,
+    size: 0, status: 'reading', chars: 0, note: '', error: '', createdAt: Date.now(),
+  });
+  (async () => {
+    try {
+      const r = await read(clean);
+      const file = 'original.pdf';
+      fs.writeFileSync(path.join(dirOf(id), file), r.pdf);
+      const pic = saveImages(id, 'pdf', r.pdf);
+      set({
+        ...rec,
+        name: r.name,
+        asin: r.product?.asin ?? '',
+        file,
+        size: r.pdf.length,
+        pages: r.pages,
+        images: pic.images,
+        status: 'ready',
+        // 목록 한 줄에 들어가게 짧게 — 무엇이 들어갔는지는 이름을 눌러 PDF 로 본다
+        note: [`아마존에서 정리한 PDF ${r.pages}쪽(가격·리뷰·광고 뺌)`, pic.images.length ? `사진 ${pic.images.length}장` : ''].filter(Boolean).join(' · '),
+      });
+    } catch (e) {
+      set({ ...rec, status: 'error', error: String(e.message ?? e).slice(0, 300) });
     }
   })();
   return rec;

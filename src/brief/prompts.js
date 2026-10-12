@@ -72,17 +72,30 @@ closing callout — and it swaps those to English on publish. You write only the
 ${FORMAT_RULES}`;
 }
 
-function sourcesBlock(textSources, pdfSources) {
-  if (!textSources.length && !pdfSources.length) {
+/** 아마존 상세페이지를 정리한 PDF(sources/amazon.js)를 어떻게 쓰는지 — 소매 판매 문구라 사실만, 브랜드 자료가 앞선다. */
+export const AMAZON_RULE = `About the Amazon product page(s) below: this is retail copy the app captured from the store listing (prices, ratings,
+reviews and other products were already removed). Use it for **product facts** — what is in the box, ingredients, directions /
+how to use, size, scent, texture, who it is for. Do **not** carry its marketing claims, superlatives or study numbers
+("100% showed improvement", "#1", "instantly", "clinically proven") into creator lines, subtitles or narration unless the
+brand's own materials or the selling points make the same claim — keep them cosmetic-safe as the house rules say.
+When it disagrees with the brand's own materials or the selling points, those win. Cite it in sourceNotes like any material.`;
+
+function sourcesBlock(textSources, pdfSources, productInfo = '') {
+  const info = String(productInfo ?? '').trim();
+  if (!textSources.length && !pdfSources.length && !info) {
     return '# Brand materials\nNone were provided. Keep product facts minimal and generic, and say so in warnings.';
   }
   const parts = ['# Brand materials'];
-  textSources.forEach((s, i) => {
-    parts.push(`## [${i + 1}] ${s.name} (${s.kind})\n<material>\n${s.text}\n</material>`);
+  let n = 0;
+  // 「제품 정보」 칸 — 기획서를 쓰는 사람이 직접 적은 사실. 자료가 없을 때 대신 쓴다(출처 이름: 제품 정보 칸).
+  if (info) parts.push(`## [${(n += 1)}] 제품 정보 칸 (written by the brief writer — treat as brand material)\n<material>\n${info}\n</material>`);
+  textSources.forEach((s) => {
+    parts.push(`## [${(n += 1)}] ${s.name} (${s.kind})\n<material>\n${s.text}\n</material>`);
   });
-  pdfSources.forEach((s, i) => {
-    parts.push(`## [${textSources.length + i + 1}] ${s.name} (pdf)\nRead this file with the Read tool before writing: ${s.path}`);
+  pdfSources.forEach((s) => {
+    parts.push(`## [${(n += 1)}] ${s.name} (${s.amazon ? 'pdf — Amazon product page, retail listing' : 'pdf'})\nRead this file with the Read tool before writing: ${s.path}`);
   });
+  if (pdfSources.some((s) => s.amazon)) parts.push(AMAZON_RULE);
   return parts.join('\n\n');
 }
 
@@ -99,7 +112,7 @@ ${inputs.sellingPoints}
 ## Concept — the overall flow and type of the video
 ${inputs.concept}
 
-${sourcesBlock(textSources, pdfSources)}
+${sourcesBlock(textSources, pdfSources, inputs.productInfo)}
 ${feedback ? `\n# Fix this in your answer\n${feedback}\n` : ''}
 Return the JSON object now.`;
 }

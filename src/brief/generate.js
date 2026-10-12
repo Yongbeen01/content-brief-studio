@@ -56,7 +56,7 @@ function collectSources(sourceIds, jobDir) {
       const src = getSourceFile(id);
       const dest = path.join(jobDir, `source-${pdfSources.length + 1}.pdf`);
       fs.copyFileSync(src, dest);
-      pdfSources.push({ name: rec.name, path: toPosix(dest) });
+      pdfSources.push({ name: rec.name, path: toPosix(dest), amazon: rec.origin === 'amazon' });
     } else {
       const text = getSourceText(id);
       // 사진만 들어 있는 파일은 글 자료 목록에 넣지 않는다(빈 자료를 보여 줄 필요가 없다).
