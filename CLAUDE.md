@@ -147,6 +147,28 @@ OAuth 연결 자체를 확인할 때만 설치본을 멈추고 4325 로 띄운�
     `cleanKeywords(list, { lang })` 는 영어면 한글이 든 것을, 한국어면 한글이 없는 것을 뺀다. 화면 캐시·요청은 「스텝 id|언어」 별로 —
     한국어로 바꾼 뒤 버튼은 [영어로 생성]이 되고, 받아 둔 언어로는 기다림 없이 돌아간다. [새로 고침]은 지금 언어로 다시.
     언어를 바꾸면 `refTarget` 을 새 객체로 바꿔 끼워 늦게 온 다른 언어 답을 버린다. 하니스 `pw-verify/cbs-ref-grid-check.mjs`(실제 Claude 21항목).
+- **틱톡 트렌드 해시태그**(2026-10-12 사용자 요청 — `src/tiktok/`, `src/brief/trend-tags.js`): 생성하면 가이드 한눈에 보기 표의
+  해시태그 중 **한두 개만** TikTok Creative Center 트렌드 해시태그(미국 · Beauty & Personal Care · 최근 7일 100개, `config.tiktokTrends`)
+  중 소구점·컨셉·제품과 맞는 것으로 바꾼다. 나머지 해시태그는 원래 작성 그대로, 브랜드 해시태그는 절대 안 바꾼다.
+  - 목록은 화면이 쓰는 API(`POST ads.tiktok.com/CreativeOne/KnowledgeAPI/GetHashtagList`, 서명 없음)를 쿠키로 부른다.
+    **로그인하지 않으면 서버가 3개만 준다**(limit·page 를 바꿔도 `pagination.limit` 3 — `isCapped`). 이 3개 제한을 우회하려 하지 말 것.
+  - **로그인 창**(`src/tiktok/browser.js`): 저장한 세션(`<데이터>/tiktok/session.json`, 비밀값)이 없거나 다시 3개로 잘리면(만료)
+    PC 의 Chrome(없으면 Edge)을 **전용 프로필**(`tiktok/browser-profile`)로 띄운다. npm 의존성 없이 `--remote-debugging-pipe`
+    (fd 3·4, \0 으로 끝나는 JSON)로 다룬다 — Node 20 에는 내장 WebSocket 이 없다. 2초마다 쿠키를 보고 로그인 쿠키(`sessionid*`·`sid_tt*` …)가
+    생기면 목록 API 로 확인 → 쿠키 저장 → **창을 우리가 닫는다**. 사람이 창을 닫으면 로그인 없이(며칠 안 된 100개 목록이 있으면 그것,
+    없으면 3개), 10분이면 닫고 진행. 창 아래쪽에 안내 띠를 넣는다(오른쪽 위 [Log in] 을 가리지 않게). 로그인 창은 동시에 하나(`loginOnce`).
+    Log in 은 별도 주소가 아니라 같은 페이지 위 모달이다.
+  - **기다림이 늘지 않게**: 수집은 글쓰기와 **같이** 시작하고(로그인하는 동안에도 Claude 는 계속 쓴다 — 화면은 `job.data.tiktokLogin` 으로
+    진행 상자 안 `#progress_notice` 를 띄운다), 고르기(sonnet)는 영어본 만들기와 **같이** 돈다. 해시태그 줄은 옮기지 않는 줄(AS_IS_ROWS)이라
+    영어본에도 같은 자리를 그대로 바꾼다(`applyTrendPicks` 를 두 문서에). 생성이 실패·취소되면 수집(로그인 창)도 같이 멈춘다(`generateBrief` 의 stop).
+  - 받은 100개는 6시간 재사용(`trends-US-14000000000-7.json`) — 생성할 때마다 틱톡에 묻지 않는다.
+  - Claude 는 「고를 태그 + 바꿀 자리」만 답하고, 규칙은 코드가 다시 지킨다(`validPicks`: 목록에 있는 것만, 이미 있는 것 제외, 브랜드 자리면 다른 자리로,
+    최대 2개). 맞는 게 없으면 빈 목록 → 해시태그 그대로. 무엇을 바꿨는지는 화면 알림(`trendNotes`)에 순위·이유와 함께 남는다.
+  - 서버가 `trends: getTrendHashtags` 를 넘길 때만 돈다 — 단위 테스트(`generateBrief` 를 가짜 Claude 로 부르는 것)는 틱톡·브라우저에 안 닿는다.
+  - 하니스: `pw-verify/cbs-trends-login-real.mjs`(진짜 Chrome·진짜 틱톡, 창 띄우기·안내 띠·사람이 닫으면 3개, 9항목),
+    `pw-verify/run-trends-ui.sh login|cache`(4331, 진짜 Claude — login: 로그인 창·화면 안내·창 닫기 11항목, cache: **시험용** 100개 목록으로 바꾸기 9항목).
+    로그인한 계정으로 실제 100개가 오는지는 사람이 로그인해야 확인된다. 윈도우 Node 24 는 fetch 뒤 `process.exit` 에서
+    `UV_HANDLE_CLOSING` 을 찍는다 — 하니스 끝의 그 줄은 이 기능과 무관하다.
 - `src/claude/` — Claude CLI 호출(구독 로그인, stream-json, --json-schema), JSON 추출.
 - `src/sources/` — 사측 공유 파일 읽기(docx·pptx·xlsx 는 의존성 없는 ZIP/XML 파서, PDF 는 Claude 가 직접 읽음, 노션 링크).
   사진도 같이 꺼낸다: `images.js`(추려내기)·`pdf-images.js`(PDF 안의 사진 객체 → JPEG 그대로 / PNG 로 다시 포장,

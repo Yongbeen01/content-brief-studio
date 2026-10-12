@@ -161,6 +161,16 @@ export const REFERENCE = obj({
   keywords: { type: 'array', items: { type: 'string', minLength: 1 }, minItems: REFERENCE_COUNT, maxItems: REFERENCE_COUNT },
 });
 
+/** 트렌드 해시태그 — 고른 것(최대 2개)과 각각 바꿀 지금 해시태그. 맞는 게 없으면 빈 목록. */
+export const TREND_PICK = obj({
+  picks: {
+    type: 'array',
+    items: obj({ tag: { type: 'string', minLength: 2 }, replaces: { type: 'string', minLength: 2 }, why: str }),
+    minItems: 0,
+    maxItems: 2,
+  },
+});
+
 /** 추가 자리 종류 → 돌려받을 모양. */
 export const INSERT = {
   top: obj({ nodes: { type: 'array', items: TOP_NODE, minItems: 1, maxItems: 6 } }),

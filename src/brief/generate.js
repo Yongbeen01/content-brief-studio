@@ -6,9 +6,10 @@ import { extractJsonObject } from '../claude/json.js';
 import { getSource, getSourceFile, getSourceText } from '../sources/index.js';
 import { COMPOSE, fixEscapes, validate } from './schema.js';
 import { composeSystem, composeUser } from './prompts.js';
-import { buildDoc, splitPoints } from './build.js';
+import { buildDoc, splitPoints, stripNumbering } from './build.js';
 import { collectCandidates, pickProductImage } from './product-image.js';
 import { translateDoc } from './translate.js';
+import { applyTrendPicks, pickTrendTags } from './trend-tags.js';
 import { lintDoc } from '../../web/js/lint.js';
 import { accountIds, badAccountIds } from '../../web/js/account.js';
 import { inline } from './inline.js';
@@ -23,7 +24,44 @@ import { inline } from './inline.js';
  * 4. 미리보기를 보여 주기 전에 **영어본까지 만들어 둔다** — [영어로 보기]를 누르면 기다림 없이 바로 나온다.
  *    옮긴 줄은 캐시(enCache)로 같이 돌려준다. 나중에 한 줄 고치면 그 줄만 다시 옮긴다.
  *    옮기기가 실패해도 기획서는 그대로 나온다(그때는 [영어로 보기]를 누를 때 옮긴다).
+ * 5. 틱톡 트렌드 해시태그(`trends` 를 넘겼을 때): 1 과 함께 받기 시작하고(로그인 창이 뜨면 사람이 로그인하는 동안에도
+ *    글은 계속 써진다), 4 와 함께 Claude 가 한두 개를 골라 해시태그 줄의 그 자리만 바꾼다. 해시태그 줄은 옮기지 않는
+ *    줄이라(AS_IS_ROWS) 영어본에도 같은 자리를 그대로 바꾼다. 무엇이 실패해도 해시태그만 그대로 두고 진행한다.
  */
+
+/** 화면에 보일 수집 기준 — 「미국 뷰티 최근 7일」. */
+function trendScopeKo(opts) {
+  const country = { US: '미국' }[opts?.country] ?? opts?.country ?? '';
+  const industry = { '14000000000': '뷰티' }[opts?.industryId] ?? '';
+  return [country, industry, opts?.period ? `최근 ${opts.period}일` : ''].filter(Boolean).join(' ');
+}
+
+/** 트렌드 해시태그 결과 → 화면 알림 문구. */
+export function trendNotes(r) {
+  if (!r) return [];
+  if (r.error) return [`틱톡 트렌드 해시태그를 받지 못해 해시태그를 그대로 두었습니다 — ${r.error.message ?? r.error}`];
+  const t = r.t;
+  const scope = trendScopeKo(t.opts);
+  const notes = [];
+  if (t.source === 'stale') {
+    const d = new Date(t.fetchedAt);
+    notes.push(`틱톡에 로그인하지 않아 ${d.getMonth() + 1}월 ${d.getDate()}일에 받아 둔 트렌드 해시태그 목록에서 골랐습니다`);
+  } else if (!t.full) {
+    const why = {
+      'no-browser': 'Chrome·Edge 를 찾지 못해 틱톡 로그인 창을 띄우지 못했습니다',
+      capped: '틱톡에 로그인했지만 이 계정에는 트렌드 해시태그가 3개까지만 보입니다',
+      timeout: '틱톡 로그인 창이 10분 동안 로그인되지 않아 닫았습니다',
+      busy: '틱톡 로그인 창이 열리자마자 닫혔습니다(예전에 열어 둔 틱톡 로그인 창이 남아 있으면 그 창을 닫고 다시 생성해 주세요)',
+    }[t.login] ?? '틱톡에 로그인하지 않았습니다';
+    notes.push(`${why} — 트렌드 해시태그를 상위 ${t.items.length}개에서만 골랐습니다. 다음 생성 때 로그인 창에서 로그인하면 100개에서 고릅니다`);
+  }
+  if (r.picks?.length) {
+    for (const p of r.picks) notes.push(`틱톡 트렌드 해시태그 ${p.tag}(${scope} ${p.rank}위)를 ${p.replaces} 대신 넣었습니다${p.why ? ` — ${p.why}` : ''}`);
+  } else if (t.items.length) {
+    notes.push(`틱톡 트렌드 해시태그 ${t.items.length}개(${scope}) 중 이 기획서와 맞는 것이 없어 해시태그를 그대로 두었습니다`);
+  }
+  return notes;
+}
 
 /** 브리프 이름은 받지 않는다 — 내용을 쓴 뒤 정한다(build.js briefTitle). 업로드폼·계정은 고른 캠페인에서 온다. */
 export const REQUIRED_INPUTS = ['uploadUrl', 'accountId', 'sellingPoints', 'concept'];
@@ -103,10 +141,25 @@ function uncoveredPoints(value, points) {
  * @param {(brand:string)=>Promise<string>} [o.lookupPartnership]
  * @param {(sourceId:string, n:number)=>object|null} [o.useImage]  고른 사진을 사진첩에 넣어 준다
  * @param {boolean} [o.pretranslate]   영어본까지 만들어 둔다(기본 켬)
+ * @param {(o:{signal:AbortSignal, onLogin:(s:'open'|'done')=>void})=>Promise<object>} [o.trends]
+ *   틱톡 트렌드 해시태그(src/tiktok/trends.js getTrendHashtags). 서버가 넣는다 — 없으면 건너뛴다(테스트).
  * @param {typeof runClaude} [o.run]   테스트에서 가짜로 바꿔 끼운다
  */
-export async function generateBrief({
-  inputs, sourceIds = [], jobDir, onProgress = () => {}, signal, lookupPartnership, useImage, pretranslate = true, run = runClaude,
+export async function generateBrief(o) {
+  // 생성이 실패·취소되면 트렌드 해시태그 수집(로그인 창 포함)도 같이 멈춘다 — 창이 혼자 남아 10분을 기다리지 않게.
+  const stop = new AbortController();
+  const onAbort = () => stop.abort();
+  o.signal?.addEventListener?.('abort', onAbort, { once: true });
+  try {
+    return await runGenerate({ ...o, trendSignal: stop.signal });
+  } finally {
+    stop.abort();
+    o.signal?.removeEventListener?.('abort', onAbort);
+  }
+}
+
+async function runGenerate({
+  inputs, sourceIds = [], jobDir, onProgress = () => {}, signal, lookupPartnership, useImage, pretranslate = true, trends, trendSignal, run = runClaude,
 }) {
   const inputErrs = validateInputs(inputs);
   if (inputErrs.length) throw new Error(inputErrs.join(' · '));
@@ -117,6 +170,20 @@ export async function generateBrief({
   const warnings = skipped.map((s) => `자료를 쓰지 못했습니다: ${s}`);
   const infos = [];
   const points = splitPoints(inputs.sellingPoints);
+
+  // 트렌드 해시태그는 글쓰기와 같이 받는다. 로그인 창이 열려 있는 동안은 화면에 안내를 띄운다(job.data.tiktokLogin).
+  let loginOpen = false;
+  let inTrends = false;
+  const loginDetail = '틱톡 로그인 창에서 로그인을 기다리는 중 — 로그인하면 창이 닫히고 이어집니다. 창을 닫으면 해시태그는 그대로 둡니다';
+  const trending = trends
+    ? trends({
+      signal: trendSignal,
+      onLogin: (s) => {
+        loginOpen = s === 'open';
+        onProgress({ data: { tiktokLogin: loginOpen }, ...(inTrends && loginOpen ? { detail: loginDetail } : {}) });
+      },
+    }).catch((e) => ({ error: e }))
+    : null;
 
   // 제품 사진 고르기는 글쓰기와 같이 돌린다 — 실패해도 기획서는 그대로 나온다(회색 자리로 남는다).
   const candidates = collectCandidates(sourceIds);
@@ -189,7 +256,30 @@ export async function generateBrief({
   }
   if (!partnershipUrl) warnings.push(`「[${value.brandName}] … Partnership Ads」 안내 페이지를 찾지 못해 📢 박스의 파트너십 코드 줄을 뺐습니다 — 필요하면 박스를 눌러 추가하세요`);
 
-  const { doc, notes } = buildDoc(value, inputs, { partnershipUrl, productAsset });
+  const built = buildDoc(value, inputs, { partnershipUrl, productAsset });
+  const { notes } = built;
+  let { doc } = built;
+
+  // 트렌드 해시태그 고르기는 영어본 만들기와 같이 돈다(해시태그 줄은 옮기지 않는 줄이라 서로 안 겹친다).
+  const brief = {
+    brand: value.brandName,
+    product: value.productName,
+    sellingPoints: points,
+    concept: inputs.concept,
+    whatIsIt: value.whatIsIt,
+    mainIdea: value.mainIdea,
+    caption: value.caption,
+    steps: value.steps.map((s) => stripNumbering(s.title)),
+  };
+  const trendPicking = trending
+    ? trending.then(async (t) => {
+      if (t?.error) return t;
+      const picks = t.items?.length
+        ? await pickTrendTags({ doc, brief, trends: t.items, opts: t.opts, jobDir, signal, run })
+        : [];
+      return { t, picks };
+    }).catch((e) => ({ error: e }))
+    : null;
 
   let docEn = null;
   const enCache = {};
@@ -201,6 +291,18 @@ export async function generateBrief({
       if (e?.kind === 'cancelled' || signal?.aborted) throw e;
       infos.push('영어본을 미리 만들지 못했습니다 — [영어로 보기]나 [노션에 최종 생성]을 누를 때 옮깁니다');
     }
+  }
+
+  if (trendPicking) {
+    inTrends = true;
+    onProgress({ phase: 'trends', detail: loginOpen ? loginDetail : '틱톡 트렌드 해시태그 고르는 중' });
+    const r = await trendPicking;
+    if (signal?.aborted) throw new ClaudeError('cancelled', '취소했습니다.');
+    if (r.picks?.length) {
+      doc = applyTrendPicks(doc, r.picks);
+      if (docEn) docEn = applyTrendPicks(docEn, r.picks);
+    }
+    infos.push(...trendNotes(r));
   }
 
   return {

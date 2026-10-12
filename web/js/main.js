@@ -713,6 +713,7 @@ const PHASES = [
   { key: 'images', label: '제품 사진 고르기' },
   { key: 'build', label: '검토·조립' },
   { key: 'translate', label: '영어본 준비 (영어로 보기용)' },
+  { key: 'trends', label: '틱톡 트렌드 해시태그 넣기' },
 ];
 
 const IMPORT_PHASES = {
@@ -759,6 +760,8 @@ function renderProgress(job, started, phases = PHASES) {
     li.append(mark, body);
     return li;
   }));
+  // 틱톡 로그인 창이 열려 있는 동안 — 글쓰기는 그사이에도 계속된다(src/brief/generate.js).
+  $('progress_notice').classList.toggle('hidden', !(job.status === 'running' && job.data?.tiktokLogin));
   $('progress_eta').textContent = fmtElapsed(Date.now() - started);
 }
 
