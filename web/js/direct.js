@@ -13,7 +13,8 @@ import {
  *
  * 무엇을 직접 고칠 수 있는지는 여기 한 곳에만 있다(편집기는 이 결과만 보고 화면을 만든다).
  * 프롬프트로 고치는 쪽 `src/brief/edit.js` 의 대상 판단과 짝이 맞아야 한다 — 스텝·표를 누르면 직접 고치기는
- * 제목 줄·머리줄을, Claude 는 전체를 맡는다. 소제목·링크는 직접 고치기만 된다(`aiOff`).
+ * 제목 줄·머리줄을, Claude 는 전체를 맡는다. 소제목·링크(임베드)·페이지 제목은 직접 고치기만 된다(`aiOff`).
+ * 글 속 링크(글자·주소)는 여기가 아니라 링크를 눌러 뜨는 창(link-editor.js · links.js)에서 고친다.
  */
 
 const LINE_HINT = '한 줄에 하나';
@@ -97,9 +98,21 @@ export function applyStepLabel(doc, stepPath, key, text, all, lang = docLang(doc
  *   apply: (doc:object, values:string[]) => object }}
  */
 export function directTarget(doc, p, lang = docLang(doc)) {
+  const at = (fields, apply, extra = {}) => ({ fields, apply, note: '', ...extra });
+  // ── 페이지 제목(미리보기 맨 위) — 노션 페이지 제목으로 글자 그대로 올라간다(영어로 옮기지 않는다) ──
+  if (Array.isArray(p) && p.length === 1 && p[0] === 'title') {
+    return at([field('title', '페이지 제목', 'text', String(doc?.title ?? ''), '노션 페이지 제목으로 그대로 올라갑니다')], (d, v) => {
+      const title = parse(TEXT, v[0]).replace(/\s+/g, ' ');
+      if (!title) throw new Error('제목을 비울 수는 없습니다.');
+      return { ...d, title };
+    }, {
+      where: '페이지 제목',
+      aiOff: true,
+      note: lang === 'en' ? '' : '영어로 옮기지 않습니다 — 노션에 올릴 제목은 영어로 적어 주세요.',
+    });
+  }
   if (!Array.isArray(p) || p[0] !== 'nodes') return null;
   const last = p[p.length - 1];
-  const at = (fields, apply, extra = {}) => ({ fields, apply, note: '', ...extra });
 
   // ── 스텝 소제목(고정 문구) — 값이 아직 없을 수 있어 먼저 본다 ──
   if (p[p.length - 2] === 'labels') {

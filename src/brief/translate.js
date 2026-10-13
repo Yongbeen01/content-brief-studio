@@ -6,6 +6,10 @@ import { TRANSLATE, fixEscapes, validate } from './schema.js';
 import { translateSystem, translateUser } from './prompts.js';
 import { clone, docLang, docToMarkdown } from '../../web/js/doc.js';
 import { applyTranslations, cacheKey, collectTranslatable } from '../../web/js/translatable.js';
+import { createLinks } from '../../web/js/links.js';
+import { inline } from './inline.js';
+
+const links = createLinks(inline);
 
 /**
  * 한국어 초안 → 노션에 올릴 영어본.
@@ -14,6 +18,7 @@ import { applyTranslations, cacheKey, collectTranslatable } from '../../web/js/t
  * 글자만 자리(경로)별로 뽑아 보내고 같은 순서로 받아 되꽂는다(뽑는 규칙은 web/js/translatable.js).
  *
  * 옮기지 않는 것: 고정 문구, 해시태그·계정 태그, 브랜드 발음 표기, 링크, 금지 표현 표의 영어 낱말 쌍.
+ * 링크 URL 은 받은 뒤 코드가 원문과 맞춘다(links.js keepLinks) — 바뀐 URL 은 되돌리고, 링크가 빠지면 다시 시킨다.
  * **이미 옮긴 줄은 다시 보내지 않는다** — 캐시(한국어 줄 → 영어 줄)에 있는 줄은 그대로 쓰고
  * 없는 줄만 Claude 에게 보낸다. 묶음이 여러 개면 동시에 보낸다(차례로 보내면 묶음 수만큼 기다린다).
  */
@@ -36,7 +41,27 @@ async function askChunk({ items, docMarkdown, run, jobDir, signal, attempt = 1, 
   const raw = result.structured ?? extractJsonObject(result.text, ['texts']);
   const value = raw ? fixEscapes(raw) : null;
   const errs = value ? validate(TRANSLATE, value) : ['JSON 을 찾지 못했습니다'];
-  if (!errs.length && value.texts.length === items.length) return value.texts;
+  if (!errs.length && value.texts.length === items.length) {
+    // 링크 URL 은 원문 그대로여야 한다 — 사람이 바꾼 URL 이 영어본에서 슬쩍 바뀌면 화면에서 알아보기 어렵다.
+    // 바뀐 URL 은 원문 것으로 되돌리고, 링크가 빠지거나 늘었으면 다시 시킨다.
+    const lost = [];
+    const texts = value.texts.map((t, i) => {
+      const r = links.keepLinks(items[i].text, String(t));
+      if (!r.ok) lost.push(i);
+      return r.text;
+    });
+    if (!lost.length) return texts;
+    if (attempt >= 2) throw new ClaudeError('bad_output', `영어로 옮기면서 링크가 빠지거나 늘었습니다(${lost.length}줄) — 다시 시도해 주세요`);
+    return askChunk({
+      items,
+      docMarkdown,
+      run,
+      jobDir,
+      signal,
+      attempt: attempt + 1,
+      feedback: `Keep every link of the Korean line — the same number of links and the exact same URLs. Lines that lost or gained a link: ${lost.map((i) => i + 1).join(', ')}.`,
+    });
+  }
   if (attempt >= 2) {
     throw new ClaudeError('bad_output', `영어로 옮긴 결과의 모양이 맞지 않습니다 — ${errs[0] ?? `${value?.texts?.length}개가 왔습니다(${items.length}개 필요)`}`);
   }

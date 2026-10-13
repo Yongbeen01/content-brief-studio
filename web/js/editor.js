@@ -16,7 +16,9 @@ import { findByPath } from './preview.js';
 
 const $ = (id) => document.getElementById(id);
 
-export function createEditor({ root, getDoc, getSourceNotes, commit, isLocked, setBusy, onSlotClick, onSlotReset, toast }) {
+export function createEditor({
+  root, getDoc, getSourceNotes, commit, isLocked, setBusy, onSlotClick, onSlotReset, onLinkClick, toast,
+}) {
   const pop = $('edit_pop');
   const text = $('edit_pop_text');
   const status = $('edit_pop_status');
@@ -41,7 +43,8 @@ export function createEditor({ root, getDoc, getSourceNotes, commit, isLocked, s
 
   root.addEventListener('mousemove', (ev) => {
     if (!root.classList.contains('is-editable') || running) return setHover(null);
-    const t = ev.target.closest('[data-slot], .n-gap') ? null : ev.target.closest('[data-path]');
+    // 고칠 수 있는 링크 위에서는 문단 대신 링크만 표시한다(누르면 링크 창 — CSS a[data-link]:hover)
+    const t = ev.target.closest('[data-slot], .n-gap, a[data-link]') ? null : ev.target.closest('[data-path]');
     setHover(t && root.contains(t) ? t : null);
   });
   root.addEventListener('mouseleave', () => setHover(null));
@@ -53,6 +56,7 @@ export function createEditor({ root, getDoc, getSourceNotes, commit, isLocked, s
     const names = {
       action: '🩷 Action', visual: '👁 Visual', subtitle: '🔤 Subtitle', narration: '💬 Narration', seconds: '⏱ Time Duration(초)',
     };
+    if (pathArr.length === 1 && pathArr[0] === 'title') return '페이지 제목';
     if (pathArr[pathArr.length - 2] === 'labels') return '스텝 소제목';
     if (names[last]) return `스텝의 ${names[last]}`;
     if (v?.type === 'step') return '스텝 전체(제목·시간·모든 칸)';
@@ -313,6 +317,11 @@ export function createEditor({ root, getDoc, getSourceNotes, commit, isLocked, s
     if (running || isLocked()) {
       toast('다른 작업이 끝난 뒤에 눌러 주세요');
       return;
+    }
+    // 글 속 링크 — 글자·주소를 고치는 창. 그 링크를 못 읽으면(모양이 특이한 링크) 아래처럼 문단 편집으로.
+    if (link?.dataset.link && onLinkClick) {
+      const { at, k } = JSON.parse(link.dataset.link);
+      if (onLinkClick({ at, k, el: link })) { close(); return; }
     }
     const reset = ev.target.closest('[data-slot-reset]');
     if (reset) { ev.stopPropagation(); onSlotReset(JSON.parse(reset.dataset.slotReset)); return; }

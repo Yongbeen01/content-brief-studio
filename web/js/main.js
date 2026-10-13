@@ -9,6 +9,8 @@ import {
   isVideoSlot, renderDoc, renderSceneCard, renderStepCard, setInline,
 } from './preview.js';
 import { createEditor } from './editor.js';
+import { createLinks } from './links.js';
+import { createLinkEditor } from './link-editor.js';
 import { englishLabel, placeholderBlob, uploadImage } from './slots.js';
 import { createVideoPanel } from './video.js';
 import { askExtension, extensionVersion, onExtensionEvent } from './tiktok-bridge.js';
@@ -27,6 +29,7 @@ import { createCampaignPicker } from './campaign.js';
 const $ = (id) => document.getElementById(id);
 const inline = createInline(window.markdownit);
 setInline(inline);
+const links = createLinks(inline);
 
 const DEFAULT_PARENT = '3d439fd7477e80058995edf04a5d1586';
 /**
@@ -683,6 +686,7 @@ async function removeSource(id) {
 // ── 미리보기 · 경고 ─────────────────────────────────────────────────────────
 
 let editor = null;
+let linkEditor = null;
 let videoPanel = null;
 
 /**
@@ -751,6 +755,9 @@ function renderPreview() {
   $('doc').classList.toggle('hidden', !doc);
   $('preview_bar').classList.toggle('hidden', !doc);
   if (doc) renderDoc($('doc'), shown, { editable: !showEn && (!state.busy || editor?.isRunning()), lang: showEn || english ? 'en' : 'ko' });
+  // 누른 링크가 다시 그리며 사라졌으면 링크 창도 닫는다(그 자리는 이미 다른 글일 수 있다)
+  if (!doc || showEn) linkEditor?.close();
+  else linkEditor?.closeIfDetached();
   // 문서를 통째로 다시 그렸으니 상자 안에서 돌고 있던 영상 작업을 다시 그려 넣는다.
   if (!showEn) videoPanel?.paint();
   $('preview_hint').textContent = showEn
@@ -2271,15 +2278,32 @@ function wire() {
     return r;
   });
 
+  // 글 속 링크를 누르면 — 텍스트·URL 을 고치는 창(새로 생성·기존 브리프 업로드 둘 다)
+  linkEditor = createLinkEditor({
+    links,
+    getDoc: () => clone(currentDoc()),
+    commit: (next, { flashPath, relink }) => {
+      // 사람이 쓴 줄의 URL 만 바꿨으면 옮겨 둔 영어 줄도 새 URL 로 — 다시 옮기지 않아 Claude 가 URL 을 건드릴 일이 없다
+      if (relink) mergeCache(links.relinkCache(state.draft.enCache, relink.before, relink.after, relink.k, relink.oldHref, relink.url));
+      commitDoc(next, { flashPath });
+    },
+    toast,
+  });
+
   editor = createEditor({
     root: $('doc'),
     getDoc: () => clone(currentDoc()),
     getSourceNotes: () => state.draft.sourceNotes ?? '',
-    commit: (next, opts) => commitDoc(next, opts),
+    commit: (next, opts) => {
+      // 제목을 고쳤으면 예전 초안에 남은 이름(inputs.briefName — 있으면 문서 제목보다 앞선다)을 비운다
+      if (next?.title !== undefined && next.title !== currentDoc()?.title) state.draft.inputs.briefName = '';
+      commitDoc(next, opts);
+    },
     isLocked: () => state.busy && !editor.isRunning(),
     setBusy: (on) => setBusy(on),
     onSlotClick,
     onSlotReset,
+    onLinkClick: (t) => linkEditor.open(t),
     toast,
   });
 }

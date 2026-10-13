@@ -143,6 +143,15 @@ ol.n-sublist ol.n-sublist { list-style-type: lower-roman; }
   background-color: rgba(2, 99, 224, 0.035);
 }
 .notion-doc [data-path].is-selected { outline: 2px solid var(--fx-blue); outline-offset: 2px; }
+/* 글 속 링크 — 누르면 링크 창(텍스트·URL). 위에 올리면 문단 대신 링크만 표시한다 */
+.notion-doc.is-editable a[data-link] { cursor: pointer; border-radius: 3px; }
+.notion-doc.is-editable a[data-link]:hover,
+.notion-doc a[data-link].is-link-selected {
+  background-color: rgba(2, 99, 224, 0.1);
+  outline: 2px solid rgba(2, 99, 224, 0.45);
+  outline-offset: 1px;
+}
+.notion-doc a[data-link].is-link-selected { outline-color: var(--fx-blue); }
 .notion-doc [data-path].is-busy { position: relative; }
 .notion-doc [data-path].is-busy::after {
   content: '';

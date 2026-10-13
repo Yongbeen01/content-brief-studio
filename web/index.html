@@ -236,6 +236,31 @@
     <p class="fx-status" id="edit_pop_status"></p>
   </div>
 
+  <!-- 링크 창 — 미리보기에서 글 속 링크를 누르면(web/js/link-editor.js) -->
+  <div class="edit-pop link-pop hidden" id="link_pop" role="dialog" aria-label="링크 고치기">
+    <div class="edit-pop-head"><span>링크 고치기</span><span class="fx-spacer"></span>
+      <button type="button" class="fx-overlay-close" id="link_pop_close" aria-label="닫기"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    </div>
+    <div class="edit-fields">
+      <div class="edit-field">
+        <label for="link_pop_text">링크 텍스트</label>
+        <input type="text" id="link_pop_text" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="edit-field">
+        <label for="link_pop_url">URL</label>
+        <input type="text" id="link_pop_url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://…">
+      </div>
+    </div>
+    <div class="edit-note hidden" id="link_pop_note"></div>
+    <div class="edit-pop-actions">
+      <button type="button" class="primary-btn" id="link_pop_apply">적용</button>
+      <button type="button" class="secondary-btn" id="link_pop_go">링크로 이동</button>
+      <button type="button" class="secondary-btn" id="link_pop_cancel">취소</button>
+    </div>
+    <div class="edit-pop-hint">Enter 로 적용 · [링크로 이동]은 지금 칸에 적힌 URL 을 새 창으로 엽니다</div>
+    <p class="fx-status" id="link_pop_status"></p>
+  </div>
+
   <!-- 팀 설정 코드 -->
   <dialog class="fx-overlay fx-modal" id="team_dialog">
     <div class="fx-overlay-head">노션 연결 준비 <span class="fx-spacer"></span>

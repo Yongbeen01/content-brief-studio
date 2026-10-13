@@ -492,6 +492,10 @@ details.card[open] > summary .fx-chevron { transform: rotate(180deg); }
 .edit-field.is-check > label { margin: 0; color: var(--fx-text); font-weight: 500; cursor: pointer; }
 .edit-field.is-check input { width: 15px; height: 15px; margin: 0; cursor: pointer; accent-color: var(--fx-blue); }
 .edit-note { font-size: 0.78rem; color: var(--fx-warning); }
+/* 링크 창 — 텍스트·URL 두 칸 + [적용]·[링크로 이동]·[취소] */
+.link-pop .edit-fields { max-height: none; overflow: visible; }
+.link-pop .edit-pop-actions .secondary-btn { flex: none; padding: 8px 12px; }
+.link-pop .edit-note { color: var(--fx-text-weak); }
 
 /* 사진 고르기 — 사측 공유 파일에서 꺼낸 사진들 */
 .fx-modal.wide { max-width: 720px; }

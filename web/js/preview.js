@@ -26,8 +26,12 @@ function el(tag, attrs = {}, ...children) {
   return e;
 }
 
-/** 인라인 마크다운 → DOM 조각. */
-export function rich(text) {
+/**
+ * 인라인 마크다운 → DOM 조각.
+ * at = 이 글이 문서 어디에 있는지(경로). 주면 링크마다 data-link = { at, k(그 글의 몇 번째 링크) } 를 단다 —
+ * 미리보기에서 링크를 누르면 그 링크의 글자·주소를 고치는 창이 뜬다(link-editor.js). 고정 문구는 그 노드의 'text' 경로.
+ */
+export function rich(text, at = null) {
   const frag = document.createDocumentFragment();
   for (const seg of inlineImpl.segments(text)) {
     let node = document.createDocumentFragment();
@@ -42,7 +46,11 @@ export function rich(text) {
     if (seg.bold) node = el('strong', {}, node);
     if (seg.underline) node = el('u', {}, node);
     if (seg.color) node = el('span', { class: colorClass(seg.color) }, node); // 한 줄 안의 부분 색(불러온 브리프)
-    if (seg.href) node = el('a', { href: seg.href, target: '_blank', rel: 'noopener noreferrer' }, node);
+    if (seg.href) {
+      node = el('a', {
+        href: seg.href, target: '_blank', rel: 'noopener noreferrer', dataset: at && seg.link >= 0 ? { link: P({ at, k: seg.link }) } : undefined,
+      }, node);
+    }
     frag.append(node);
   }
   return frag;
@@ -105,7 +113,7 @@ function list(tag, items, path, levels = []) {
       stack[stack.length - 1].lastElementChild.append(sub);
       stack.push(sub);
     }
-    stack[stack.length - 1].append(el('li', {}, rich(t)));
+    stack[stack.length - 1].append(el('li', {}, rich(t, [...path, 'items', i])));
   });
   return root;
 }
@@ -128,16 +136,17 @@ function stepFields(doc, n, t, ctx, path) {
     el('div', { class: 'n-h n-h3 n-label', dataset: at([...(path ?? []), 'labels', STEP_LABELS[field]]), title: path ? '소제목 고치기' : null },
       rich(labelText(doc, n, STEP_LABELS[field], lang))),
     el('div', { class: 'n-sub-body', dataset: at([...(path ?? []), field]) }, content ?? el('div', { class: 'n-p n-empty' }, empty)));
-  const lines = (arr) => (arr?.length ? el('div', {}, arr.map((s) => el('div', { class: 'n-p' }, rich(s)))) : null);
+  const lines = (arr, field) => (arr?.length ? el('div', {}, arr.map((s, i) => el('div', { class: 'n-p' }, rich(s, path ? [...path, field, i] : null)))) : null);
+  const bullets = (arr, field) => (arr?.length ? el('ul', { class: 'n-ul' }, arr.map((s, i) => el('li', {}, rich(s, path ? [...path, field, i] : null)))) : null);
   const extra = (n.extra ?? []).map((c, i) => renderNode(doc, c, [...(path ?? []), 'extra', i], ctx));
   // 불러온 브리프에 원래 없던 칸 — 비워 두면 노션에도 안 올라간다.
   const none = doc.origin === 'import' ? (path ? '(원본에 없음 — 눌러서 추가)' : '(원본에 없음)') : null;
   return [
     sub('seconds', el('div', { class: 'n-p' }, t ? durationText(t, lang) : '')),
-    sub('action', n.action?.length ? el('ul', { class: 'n-ul' }, n.action.map((s) => el('li', {}, rich(s)))) : null, none ?? '(비어 있음)'),
-    sub('visual', n.visual?.length ? el('ul', { class: 'n-ul' }, n.visual.map((s) => el('li', {}, rich(s)))) : null, none ?? '(비어 있음)'),
-    sub('subtitle', lines(n.subtitle), none ?? '(비어 있음)'),
-    sub('narration', lines(n.narration), none ?? (path ? '(없음 — 눌러서 추가)' : '(없음)')),
+    sub('action', bullets(n.action, 'action'), none ?? '(비어 있음)'),
+    sub('visual', bullets(n.visual, 'visual'), none ?? '(비어 있음)'),
+    sub('subtitle', lines(n.subtitle, 'subtitle'), none ?? '(비어 있음)'),
+    sub('narration', lines(n.narration, 'narration'), none ?? (path ? '(없음 — 눌러서 추가)' : '(없음)')),
     ...extra,
   ];
 }
@@ -166,9 +175,9 @@ function renderNode(doc, n, path, ctx) {
   const lang = ctx.lang;
   switch (n.type) {
     case 'paragraph':
-      return el('div', { class: `n-block n-p ${colorClass(n.color)}`, dataset: { path: P(path) } }, rich(nodeText(n, lang)));
+      return el('div', { class: `n-block n-p ${colorClass(n.color)}`, dataset: { path: P(path) } }, rich(nodeText(n, lang), [...path, 'text']));
     case 'heading':
-      return el('div', { class: `n-block n-h n-h${n.level} ${colorClass(n.color)}`, dataset: { path: P(path) } }, rich(nodeText(n, lang)));
+      return el('div', { class: `n-block n-h n-h${n.level} ${colorClass(n.color)}`, dataset: { path: P(path) } }, rich(nodeText(n, lang), [...path, 'text']));
     case 'embed':
       return el('div', { class: 'n-block n-embed', dataset: { path: P(path) } },
         el('span', { class: 'n-embed-kind' }, EMBED_KIND[n.kind] ?? '링크'),
@@ -197,7 +206,7 @@ function renderNode(doc, n, path, ctx) {
       const rows = tableRows(n, lang).map((r, i) => el('tr', {
         class: n.header && i === 0 ? 'is-head' : '',
         dataset: { path: P(n.header && i === 0 ? path : [...path, 'rows', i]) },
-      }, r.map((c) => el('td', {}, rich(c)))));
+      }, r.map((c, j) => el('td', {}, rich(c, n.rowChrome?.[i]?.[j] ? null : [...path, 'rows', i, j])))));
       return el('div', { class: 'n-block n-table-wrap' }, el('table', { class: 'n-table' }, el('tbody', {}, rows)));
     }
     case 'callout': {
@@ -236,7 +245,8 @@ function renderNode(doc, n, path, ctx) {
         if (pic && n.imagesFirst) wrap.append(pic);
         wrap.append(el('div', { class: 'n-cols' }, row.map((it) => {
           const { title, desc } = gridItemText(it, lang);
-          const text = [el('div', { class: 'n-h n-h3' }, rich(`${it.n}. ${title}`)), desc ? el('div', { class: 'n-p' }, rich(desc)) : null];
+          const text = [el('div', { class: 'n-h n-h3' }, rich(`${it.n}. ${title}`)),
+            desc ? el('div', { class: 'n-p' }, rich(desc, it.chrome ? null : [...iPath, it.index, 'desc'])) : null];
           // 새로 만든 기획서는 항목마다 사진 하나, 번호 아래에(perItem). 글과 사진을 따로 누른다.
           if (!it.image) return el('div', { class: 'n-col', dataset: { path: P([...iPath, it.index]) } }, ...text);
           return el('div', { class: 'n-col' },
@@ -253,10 +263,10 @@ function renderNode(doc, n, path, ctx) {
     case 'wordTable':
       return el('div', { class: 'n-block', dataset: { path: P(path) } },
         el('div', { class: 'n-h n-h3' }, wordTableTitle(doc, lang, n)),
-        n.note ? el('div', { class: 'n-p' }, rich(n.note)) : null,
+        n.note ? el('div', { class: 'n-p' }, rich(n.note, [...path, 'note'])) : null,
         el('div', { class: 'n-table-wrap' }, el('table', { class: 'n-table' }, el('tbody', {},
           el('tr', { class: 'is-head' }, el('td', {}, labelText(doc, n, 'wordTableDont', lang)), el('td', {}, labelText(doc, n, 'wordTableInstead', lang))),
-          n.rows.map((r) => el('tr', {}, el('td', {}, rich(r.dont)), el('td', {}, rich(r.instead))))))));
+          n.rows.map((r, k) => el('tr', {}, el('td', {}, rich(r.dont, [...path, 'rows', k, 'dont'])), el('td', {}, rich(r.instead, [...path, 'rows', k, 'instead']))))))));
     default:
       return el('div', { class: 'n-block n-p n-empty' }, `(${n.type})`);
   }
@@ -266,7 +276,12 @@ export function renderDoc(root, doc, { editable = true, lang = 'ko' } = {}) {
   const ctx = { editable, lang, tl: stepTimeline(doc) };
   root.replaceChildren();
   root.classList.toggle('is-editable', editable);
-  root.append(el('div', { class: `n-title ${doc.title ? '' : 'is-empty'}` }, doc.title || '(브리프 이름 없음)'));
+  // 제목도 눌러서 고친다(direct.js — 노션 페이지 제목 그대로 올라간다)
+  root.append(el('div', {
+    class: `n-title ${doc.title ? '' : 'is-empty'}`,
+    dataset: editable ? { path: P(['title']) } : undefined,
+    title: editable ? '제목 고치기' : null,
+  }, doc.title || '(브리프 이름 없음)'));
   (doc.nodes ?? []).forEach((n, i) => {
     if (editable) root.append(gap(['nodes'], i));
     root.append(renderNode(doc, n, ['nodes', i], ctx));
