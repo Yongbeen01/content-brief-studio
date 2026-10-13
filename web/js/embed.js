@@ -9,10 +9,13 @@
  *                      cbs:notify-prime / cbs:notify  완료 알림 — iframe 안에서는 크롬이 알림 권한을 못 묻게 막아 케비서가 대신 띄운다
  *   케비서 → 이 화면   kebiso:provision { kglowingApiKey?, notion?: { token, parentPageId? } }  → /api/provision
  *                      kebiso:ping      cbs:hello 를 다시 보내 달라
+ *                      kebiso:open-campaign { campaignId }  그 캠페인을 골라 둔 채 시작(TTLab › Campaign 의 버튼) → cbs:campaign-opened
  */
 import { api } from './api.js';
 
 export const PROTOCOL = 1;
+/** 이 판이 알아듣는 케비서 부탁 — 케비서가 예전 판을 알아보고 안내한다 */
+export const FEATURES = ['open-campaign'];
 
 let inFrame = false;
 try {
@@ -44,9 +47,9 @@ export function postToParent(msg) {
 }
 
 /**
- * @param {{ getStatus: () => object, onProvisioned: (r: object) => void | Promise<void>, origins: string[] }} o
+ * @param {{ getStatus: () => object, onProvisioned: (r: object) => void | Promise<void>, onOpenCampaign?: (id: number) => void, origins: string[] }} o
  */
-export function initEmbed({ getStatus, onProvisioned, origins }) {
+export function initEmbed({ getStatus, onProvisioned, onOpenCampaign, origins }) {
   if (!inFrame) return;
   allowed = Array.isArray(origins) ? origins.filter((s) => typeof s === 'string') : [];
   document.documentElement.dataset.embedded = '1';
@@ -58,6 +61,12 @@ export function initEmbed({ getStatus, onProvisioned, origins }) {
     parentOrigin = e.origin;
     if (msg.type === 'kebiso:ping') {
       sendHello(getStatus());
+      return;
+    }
+    if (msg.type === 'kebiso:open-campaign') {
+      const id = Number(msg.campaignId);
+      if (Number.isInteger(id) && id > 0 && onOpenCampaign) onOpenCampaign(id);
+      else postToParent({ type: 'cbs:campaign-opened', ok: false, campaignId: msg.campaignId ?? null, error: '캠페인 번호가 아닙니다' });
       return;
     }
     if (msg.type === 'kebiso:provision') {
@@ -83,5 +92,5 @@ export function initEmbed({ getStatus, onProvisioned, origins }) {
 
 /** 케비서 화면 위쪽 「준비 상태」 줄이 쓰는 값. 비밀값은 넣지 않는다. */
 export function sendHello(status) {
-  postToParent({ type: 'cbs:hello', protocol: PROTOCOL, ...status });
+  postToParent({ type: 'cbs:hello', protocol: PROTOCOL, features: FEATURES, ...status });
 }

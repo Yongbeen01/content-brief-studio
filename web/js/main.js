@@ -12,7 +12,12 @@ import { createEditor } from './editor.js';
 import { englishLabel, placeholderBlob, uploadImage } from './slots.js';
 import { createVideoPanel } from './video.js';
 import { askExtension, extensionVersion, onExtensionEvent } from './tiktok-bridge.js';
-import { initEmbed, isEmbedded, sendHello } from './embed.js';
+import {
+  initEmbed, isEmbedded, postToParent, sendHello,
+} from './embed.js';
+import {
+  campaignForDraft, findCampaign, openCampaignPlan, parseCampaignId,
+} from './open-campaign.js';
 import {
   accountTag, accountValue, badAccountIds, formatAccountInput,
 } from './account.js';
@@ -65,6 +70,13 @@ const state = {
   externalApi: {},
   /** 케비서 iframe { origins: 믿는 부모 출처, provision: 케비서가 넣어 준 값 { fields } | null } */
   embed: { origins: [], provision: null },
+  /**
+   * 골라 둔 채 열 캠페인 { id, at } — 케비서 TTLab › Campaign 의 [컨텐츠 브리프 생성] 이 넘긴다.
+   * 초안·캠페인 목록이 준비되고 하던 작업이 끝나야 적용된다(applyPendingCampaign).
+   */
+  pendingCampaign: null,
+  /** 켜지는 과정(초안 읽기·끝난 생성 이어받기)을 마쳤는가 — 그 전에는 골라 둘 초안이 바뀔 수 있다 */
+  booted: false,
 };
 
 const isImport = () => state.draft?.mode === 'import';
@@ -331,20 +343,28 @@ function renderCampaign() {
     : 'Account Tag 에 그대로 들어갑니다. 계정이 여러 개면 띄어쓰기를 누르고 이어서 쓰세요 — @ID1, @ID2 로 들어갑니다.';
 }
 
+// 목록 요청 순번 — 켤 때 받기와 케비서가 키를 넣은 뒤 다시 받기가 겹치면 늦게 온 옛 응답(키 없음)이 새 목록을 덮는다.
+let campaignSeq = 0;
+
 async function loadCampaigns({ fresh = false } = {}) {
+  const seq = ++campaignSeq;
+  let next;
   try {
     const r = await api('GET', `/api/campaigns${fresh ? '?fresh=1' : ''}`);
-    state.campaigns = {
+    next = {
       configured: !!r.configured, list: r.campaigns ?? [], error: r.error ?? '', loadedAt: Date.now(),
     };
   } catch (e) {
-    state.campaigns = {
+    next = {
       ...state.campaigns, configured: state.campaigns.configured ?? true, error: e.message, loadedAt: Date.now(),
     };
   }
+  if (seq !== campaignSeq) return;
+  state.campaigns = next;
   renderCampaign();
   refreshFormState();
   paintKglowing(); // 키가 있는데 목록을 못 받았으면 버튼에 알린다
+  applyPendingCampaign();
 }
 
 /**
@@ -356,21 +376,81 @@ function pickCampaign(c) {
     toast('지금 하는 작업이 끝난 뒤에 바꿔 주세요');
     return;
   }
-  const campaign = {
-    id: c.id,
-    title: c.title,
-    brand: c.brand,
-    status: c.status,
-    snsType: c.snsType,
-    managedYearMonth: c.managedYearMonth,
-    accountId: c.accountId ?? '',
-  };
-  state.draft.inputs = { ...state.draft.inputs, campaign };
+  state.draft.inputs = { ...state.draft.inputs, campaign: campaignForDraft(c) };
   state.draft.inputs = readForm();
   renderCampaign();
   refreshFormState();
   if (state.draft.doc) renderPreview();
   scheduleSave();
+}
+
+// ── 캠페인을 골라 둔 채 열기(케비서 TTLab › Campaign 의 [컨텐츠 브리프 생성]) ─────────────────
+
+/** 키가 아직 없을 때(케비서가 넣어 주는 중) 기다리는 시간 — 넘으면 못 골랐다고 알린다 */
+const PENDING_WAIT_MS = 30_000;
+let applyingCampaign = false;
+
+function requestCampaign(id) {
+  state.pendingCampaign = { id, at: Date.now() };
+  setTimeout(applyPendingCampaign, PENDING_WAIT_MS + 200);
+  applyPendingCampaign();
+}
+
+function finishOpenCampaign(id, ok, error = '') {
+  if (!ok) toast(error, true);
+  postToParent({ type: 'cbs:campaign-opened', ok, campaignId: id, error });
+  if (isEmbedded()) sendHello({ version: state.version, ...embedStatus() });
+}
+
+/**
+ * 골라 둘 캠페인이 있으면 지금 적용한다 — 초안이 준비되고, 하던 작업이 없고, 캠페인 목록을 받았을 때만.
+ * 켤 때·목록을 받았을 때·작업이 끝났을 때·케비서가 부탁할 때 부른다(조건이 안 맞으면 그냥 기다린다).
+ */
+async function applyPendingCampaign() {
+  const p = state.pendingCampaign;
+  if (!p || applyingCampaign || !state.booted || !state.draft || state.busy || state.importJob) return;
+  const waited = Date.now() - p.at;
+  if (state.campaigns.configured === null) return; // 목록을 받는 중
+  if (!campaignMode()) {
+    // 키가 없으면 케비서가 넣어 주는 중일 수 있다 — 조금 기다린다
+    if (state.campaigns.configured === false && waited < PENDING_WAIT_MS) return;
+    state.pendingCampaign = null;
+    finishOpenCampaign(p.id, false, state.campaigns.configured === false
+      ? `캠페인 #${p.id} 을(를) 고르지 못했습니다 — Kglowing API 키가 없습니다`
+      : `캠페인 #${p.id} 을(를) 고르지 못했습니다 — ${state.campaigns.error}`);
+    return;
+  }
+  applyingCampaign = true;
+  state.pendingCampaign = null;
+  try {
+    let c = findCampaign(state.campaigns.list, p.id);
+    if (!c) {
+      // 목록에서 빠진 캠페인(DROPPED 등) — 한 건만 따로 찾아 본다
+      try { c = (await api('GET', `/api/campaigns/${p.id}`)).campaign ?? null; } catch { c = null; }
+    }
+    if (!c) {
+      finishOpenCampaign(p.id, false, `캠페인 #${p.id} 을(를) 캠페인 목록에서 찾지 못했습니다`);
+      return;
+    }
+    const plan = openCampaignPlan(state.draft, p.id);
+    const hadGeneration = !!state.draft.generation;
+    if (plan === 'new-draft') {
+      try { await saveNow(); } catch { /* 자동 저장이 이미 해 뒀다 */ }
+      startFresh({ mode: 'new', focus: false });
+    } else if (state.draft.mode !== 'new') {
+      state.draft.mode = 'new';
+      applyMode();
+      scheduleSave();
+    }
+    if (plan !== 'same') pickCampaign(c);
+    const label = `#${p.id}${c.title ? ` ${c.title}` : ''}`;
+    toast(plan === 'new-draft'
+      ? `캠페인 ${label} 로 새 기획서를 시작했습니다 — 앞 초안은 ${hadGeneration ? '아카이브에서 다시 열 수 있습니다' : '저장돼 있습니다'}`
+      : `캠페인 ${label} 을(를) 골랐습니다`);
+    finishOpenCampaign(p.id, true);
+  } finally {
+    applyingCampaign = false;
+  }
 }
 
 // ── 새로 생성 ↔ 기존 브리프 업로드 ─────────────────────────────────────────
@@ -790,6 +870,7 @@ function setBusy(on) {
   renderRevise();
   // 작업이 끝나면 다시 그려서 누를 곳·추가할 틈을 되살린다. 작업 중에 그린 화면은 편집이 꺼진 모양이다.
   if (was && !on && state.draft.doc) renderPreview();
+  if (was && !on) applyPendingCampaign(); // 작업 중에 케비서가 캠페인을 넘겼으면 이제 고른다
 }
 
 /**
@@ -1374,6 +1455,8 @@ function embedStatus() {
     notion: { connected: !!state.notion.connected, mode: state.notion.mode ?? '' },
     kglowing: { configured: !!state.externalApi.configured },
     provision: state.embed.provision,
+    // 지금 초안이 고른 캠페인 — 케비서가 「캠페인 #100 선택됨」 을 보여 준다
+    campaign: state.draft?.inputs?.campaign?.id ?? null,
   };
 }
 
@@ -1384,6 +1467,7 @@ async function refreshState() {
     state.notion = s.notion;
     state.externalApi = s.externalApi ?? {};
     state.embed = s.embed ?? { origins: [], provision: null };
+    state.version = s.version;
     paintClaude();
     paintNotion();
     paintKglowing();
@@ -2045,7 +2129,13 @@ function startNew() {
     : '지금 초안을 닫고 새 기획서를 시작할까요? (지금 초안은 저장돼 있습니다)';
   // eslint-disable-next-line no-alert
   if (!window.confirm(msg)) return;
+  startFresh();
+}
+
+/** 새 초안으로 바꾼다(묻지 않는다 — 부르는 쪽이 정한다). mode 를 주면 그 탭으로 시작한다. */
+function startFresh({ mode, focus = true } = {}) {
   state.draft = newDraft();
+  if (mode) state.draft.mode = mode;
   state.undo = [];
   state.sources.clear();
   resetRevise();
@@ -2055,7 +2145,7 @@ function startNew() {
   renderPreview();
   renderArchive();
   scheduleSave();
-  (isImport() ? $('i_link') : picker?.trigger)?.focus();
+  if (focus) (isImport() ? $('i_link') : picker?.trigger)?.focus();
 }
 
 function wire() {
@@ -2210,13 +2300,24 @@ function wire() {
         await refreshState();
         if (r.changed?.includes('kglowing')) loadCampaigns({ fresh: true });
       },
+      // TTLab › Campaign 의 [컨텐츠 브리프 생성] — 그 캠페인을 골라 둔 채 시작
+      onOpenCampaign: (id) => requestCampaign(id),
     });
+    // 주소로 받은 캠페인(?campaign=100)도 같은 길로 — 새로고침에 다시 고르지 않게 주소에서는 지운다.
+    const fromUrl = parseCampaignId(new URLSearchParams(window.location.search).get('campaign'));
+    if (fromUrl) {
+      window.history.replaceState(null, '', window.location.pathname);
+      requestCampaign(fromUrl);
+    }
     // 확장(1.3 이상)이 이 화면이 있는 탭·프레임을 기억하게 한다 — 케비서 iframe 안이면 탭 주소로는 못 찾는다.
     if (extensionVersion()) askExtension('hello', {});
     await loadDraft();
     loadCampaigns(); // 외부 API — 느려도 화면을 막지 않는다
     await refreshArchive();
     await resumeFinished();
+    // 끝난 생성을 이어받으면 초안이 바뀐다 — 그 뒤에야 캠페인을 골라 둔다
+    state.booted = true;
+    applyPendingCampaign();
     setInterval(refreshState, 30_000);
   } catch (e) {
     document.body.prepend(Object.assign(document.createElement('p'), { className: 'fx-status bad', textContent: `시작하지 못했습니다 — ${e.message}` }));

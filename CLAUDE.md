@@ -142,7 +142,12 @@ OAuth 연결 자체를 확인할 때만 설치본을 멈추고 4325 로 띄운�
   - 케비서가 켜기: `launch.ps1` 이 켤 때마다 HKCU `kglowing-brief://` 를 **설치본(%LOCALAPPDATA%)일 때만** 등록한다
     (`wscript app.vbs -NoBrowser`). 시험은 `CBS_SKIP_PROTOCOL=1`.
   - 확장은 1.3.0 부터 iframe 안에도 붙는다(`all_frames`, 앱을 탭+프레임 번호로 기억). 화면은 켤 때 `askExtension('hello')` 로 알린다.
-  - 하니스 `pw-verify/cbs-embed-check.mjs`(시험 부모 페이지가 iframe 으로 담는다).
+  - **캠페인을 골라 둔 채 열기**(2026-10-13): 케비서 TTLab › Campaign 의 [컨텐츠 브리프 생성] → `kebiso:open-campaign {campaignId}`
+    (또는 주소 `?campaign=`) → `state.pendingCampaign` → `applyPendingCampaign()`(켜기 끝·목록 받음·작업 끝·부탁 때 다시 시도).
+    판단은 `web/js/open-campaign.js openCampaignPlan` — 같은 캠페인 그대로 / 빈 초안 그 자리 / 내용 있는 초안 → 저장 후 새 초안.
+    키가 없으면(케비서가 넣는 중) 30초 기다린다. 목록에 없는 번호는 `/api/campaigns/:id` 로 한 번 더. 답은 `cbs:campaign-opened`,
+    hello 의 `features: ['open-campaign']` 로 케비서가 예전 판을 알아본다. `loadCampaigns` 는 요청 순번으로 늦게 온 옛 응답을 버린다.
+  - 하니스 `pw-verify/cbs-embed-check.mjs`(시험 부모 페이지가 iframe 으로 담는다), `pw-verify/cbs-kebiso-campaign.mjs`(캠페인 미리 고르기 14, 4325→4326 돌려 쓰기).
 - **레퍼런스 검색**(`src/brief/reference.js`, 문안은 `prompts.js REFERENCE_PROMPT` — CR팀이 준 글 그대로): 스텝 하나 → 틱톡 검색어 15개(sonnet).
   {{step}} 의 칸 이름은 문안이 부르는 [행동]·[화면]·[자막]·[내레이션]·[시간]으로 고정. [새로 고침]만 직전 키워드를 덧붙여 겹치지 않게 한다.
   - **틱톡 다운로더(확장 1.1+) 연결**(`web/js/tiktok-bridge.js`, 확장 쪽은 별도 프로젝트 `Documents\tiktok-video-downloader` 의
