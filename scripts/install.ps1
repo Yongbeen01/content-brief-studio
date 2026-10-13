@@ -45,7 +45,7 @@ New-Item -ItemType Directory -Force -Path $DataDir, $Runtime | Out-Null
 Step '실행 중인 앱 확인'
 $stopped = $false
 # 이미 깔려 있으면 그쪽 실행기에 맡긴다 — pid 파일과 포트를 같이 본다.
-$oldLaunch = Join-Path $AppDir 'scriptslaunch.ps1'
+$oldLaunch = Join-Path $AppDir 'scripts\launch.ps1'
 if (Test-Path $oldLaunch) {
   try { & powershell -NoProfile -ExecutionPolicy Bypass -File $oldLaunch -Stop | Out-Null } catch {}
 }
@@ -181,6 +181,6 @@ Invoke-Script 'scripts\launch.ps1'
 
 Write-Host ""
 Write-Host "  설치 끝났습니다." -ForegroundColor Green
-Write-Host "  처음 한 번: 화면 오른쪽 위 [노션 설정]에 관리자에게 받은 팀 설정 코드를 넣어 주세요." -ForegroundColor DarkGray
-Write-Host "  다음부터는 바탕화면의 Content Brief Studio 아이콘으로 여세요." -ForegroundColor DarkGray
+Write-Host "  케비서 TTLabs > 컨텐츠 브리프 생성 에서 여세요 - 키가 자동으로 들어가고, 꺼져 있으면 케비서가 켭니다." -ForegroundColor DarkGray
+Write-Host "  바탕화면의 Content Brief Studio 아이콘으로 열어도 됩니다(그때는 오른쪽 위에서 키를 직접 넣습니다)." -ForegroundColor DarkGray
 Write-Host ""

@@ -9,7 +9,8 @@
 # 이 파일은 UTF-8 BOM 으로 저장해야 합니다 — PowerShell 5.1 이 BOM 없는 한글을 ANSI 로 읽어 깨뜨립니다.
 # 고친 뒤에는 node scripts/fix-encodings.mjs 로 BOM·CRLF 를 맞춥니다.
 
-param([switch]$Stop, [switch]$Restart, [switch]$NoBrowser)
+# 케비서가 kglowing-brief:// 로 켤 때 윈도우가 주소를 덧붙여 넘길 수 있다 — 남는 인자는 받아서 버린다.
+param([switch]$Stop, [switch]$Restart, [switch]$NoBrowser, [Parameter(ValueFromRemainingArguments = $true)]$Rest)
 
 $ErrorActionPreference = 'Stop'
 $Root    = Split-Path -Parent $PSScriptRoot
@@ -62,6 +63,21 @@ if (Test-Path $ico) {
       $l = $sh.CreateShortcut($lp)
       if ($l.Arguments -like "*$Root\scripts\app.vbs*" -and $l.IconLocation -ne "$ico,0") { $l.IconLocation = "$ico,0"; $l.Save() }
     }
+  } catch {}
+}
+
+# 케비서 「TTLabs › 컨텐츠 브리프 생성」 이 이 앱을 켤 수 있게 kglowing-brief:// 를 등록한다(이 사용자만, 관리자 권한 없이).
+# 설치본만 등록한다 — 개발 사본을 한 번 켰다고 케비서가 그쪽을 켜면 안 된다. 켤 때마다 같은 값으로 맞추므로
+# 자동 업데이트로 이 판을 받은 PC 도 다음에 켜질 때 등록된다.
+$InstallDir = if ($env:CBS_APP_DIR) { $env:CBS_APP_DIR } else { Join-Path $env:LOCALAPPDATA 'content-brief-studio' }
+if (-not $env:CBS_SKIP_PROTOCOL -and ([IO.Path]::GetFullPath($Root).TrimEnd('\') -ieq [IO.Path]::GetFullPath($InstallDir).TrimEnd('\'))) {
+  try {
+    $key = 'HKCU:\Software\Classes\kglowing-brief'
+    $cmd = "`"$env:WINDIR\System32\wscript.exe`" `"$Root\scripts\app.vbs`" -NoBrowser"
+    New-Item -Path "$key\shell\open\command" -Force | Out-Null
+    Set-ItemProperty -Path $key -Name '(default)' -Value 'URL:Content Brief Studio'
+    Set-ItemProperty -Path $key -Name 'URL Protocol' -Value ''
+    Set-ItemProperty -Path "$key\shell\open\command" -Name '(default)' -Value $cmd
   } catch {}
 }
 

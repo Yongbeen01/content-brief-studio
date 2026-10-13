@@ -8,9 +8,16 @@
 - 형식과 어조는 [docs/brief-template-guide.md](docs/brief-template-guide.md) 를 그대로 따릅니다.
 - 화면 모양은 TikTok Final Report 플러그인과 같습니다.
 
+## 케비서에서 쓰기 (권장)
+
+케비서 **TTLabs › 컨텐츠 브리프 생성** 을 열면 이 프로그램 화면이 케비서 안에 그대로 뜹니다.
+일은 지금처럼 내 PC 에서 하고, **Kglowing 키와 노션 설정은 케비서가 알아서 넣습니다**(아래 3·4번이 필요 없습니다).
+프로그램이 꺼져 있으면 케비서가 켜고, 설치돼 있지 않으면 그 화면에서 설치 파일을 받아 진행합니다.
+처음 한 번 크롬이 「로컬 네트워크 액세스」 와 프로그램 열기(「항상 허용」 체크 후 [열기])를 묻습니다 — 둘 다 허용합니다.
+
 ## 설치 (처음 한 번)
 
-1. 관리자에게 받은 **install.bat** 을 두 번 누릅니다(케비서 「프로그램 다운로드 센터」에서 설치해도 됩니다).
+1. 관리자에게 받은 **install.bat** 을 두 번 누릅니다(케비서 「프로그램 다운로드 센터」나 「컨텐츠 브리프 생성」 에서 받아도 됩니다).
    또는 PowerShell 에 이 한 줄:
    ```powershell
    irm https://raw.githubusercontent.com/Yongbeen01/content-brief-studio/main/scripts/install.ps1 | iex

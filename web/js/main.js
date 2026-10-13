@@ -12,6 +12,7 @@ import { createEditor } from './editor.js';
 import { englishLabel, placeholderBlob, uploadImage } from './slots.js';
 import { createVideoPanel } from './video.js';
 import { askExtension, extensionVersion, onExtensionEvent } from './tiktok-bridge.js';
+import { initEmbed, isEmbedded, sendHello } from './embed.js';
 import {
   accountTag, accountValue, badAccountIds, formatAccountInput,
 } from './account.js';
@@ -62,6 +63,8 @@ const state = {
   campaigns: { configured: null, list: [], error: '', loadedAt: 0 },
   /** Kglowing API 키 상태 { configured, hint(끝 네 글자), fromEnv } — 오른쪽 위 버튼 */
   externalApi: {},
+  /** 케비서 iframe { origins: 믿는 부모 출처, provision: 케비서가 넣어 준 값 { fields } | null } */
+  embed: { origins: [], provision: null },
 };
 
 const isImport = () => state.draft?.mode === 'import';
@@ -1319,6 +1322,10 @@ function paintNotion() {
     dot.className = 'dot bad';
     t.textContent = '노션 연결';
     btn.classList.add('is-primary');
+  } else if (n.mode === 'token' && fromKebiso('notion')) {
+    dot.className = 'dot ok';
+    t.textContent = '노션 · kebiso 공용';
+    btn.title = '케비서가 넣어 준 공용 노션 키로 올립니다';
   } else {
     dot.className = n.expiresSoon ? 'dot bad' : 'dot ok';
     t.textContent = `노션 · ${n.workspace || '연결됨'}`;
@@ -1350,8 +1357,24 @@ function paintKglowing() {
   } else {
     dot.className = 'dot ok';
     t.textContent = 'Kglowing API';
-    btn.title = `저장된 키 ${k.hint} — 눌러서 바꾸거나 지우기`;
+    btn.title = fromKebiso('kglowing')
+      ? `케비서가 넣어 준 키 ${k.hint} — 케비서에서 열 때마다 맞춰집니다`
+      : `저장된 키 ${k.hint} — 눌러서 바꾸거나 지우기`;
   }
+}
+
+/** 케비서가 넣어 준 값인가(「컨텐츠 브리프 생성」 으로 열었을 때) */
+const fromKebiso = (field) => !!state.embed.provision?.fields?.includes(field);
+
+/** 케비서 화면 위쪽 「준비 상태」 줄에 보낼 것 — 비밀값은 넣지 않는다 */
+function embedStatus() {
+  return {
+    claude: { found: state.claude.found !== false, loggedIn: !!state.claude.loggedIn, email: state.claude.email ?? '' },
+    extension: extensionVersion(),
+    notion: { connected: !!state.notion.connected, mode: state.notion.mode ?? '' },
+    kglowing: { configured: !!state.externalApi.configured },
+    provision: state.embed.provision,
+  };
 }
 
 async function refreshState() {
@@ -1360,9 +1383,11 @@ async function refreshState() {
     state.claude = s.claude;
     state.notion = s.notion;
     state.externalApi = s.externalApi ?? {};
+    state.embed = s.embed ?? { origins: [], provision: null };
     paintClaude();
     paintNotion();
     paintKglowing();
+    if (isEmbedded()) sendHello({ version: s.version, ...embedStatus() });
     return s;
   } catch {
     return null;
@@ -2174,9 +2199,20 @@ function wire() {
 
 (async function boot() {
   try {
-    await initSession();
+    const session = await initSession();
     wire();
     await refreshState();
+    // 케비서 iframe 으로 열렸으면 케비서가 비밀값을 넣어 준다 — 키가 바뀌면 캠페인 목록을 새로 받는다.
+    initEmbed({
+      origins: state.embed.origins,
+      getStatus: () => ({ version: session.version, ...embedStatus() }),
+      onProvisioned: async (r) => {
+        await refreshState();
+        if (r.changed?.includes('kglowing')) loadCampaigns({ fresh: true });
+      },
+    });
+    // 확장(1.3 이상)이 이 화면이 있는 탭·프레임을 기억하게 한다 — 케비서 iframe 안이면 탭 주소로는 못 찾는다.
+    if (extensionVersion()) askExtension('hello', {});
     await loadDraft();
     loadCampaigns(); // 외부 API — 느려도 화면을 막지 않는다
     await refreshArchive();

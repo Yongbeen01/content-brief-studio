@@ -32,6 +32,7 @@ import { notionClient } from './notion/index.js';
 import * as oauth from './notion/oauth.js';
 import * as kglowing from './external/kglowing.js';
 import { updateStatus, bootId } from './update.js';
+import { applyProvision, embedOrigins, frameAncestors, provisionState } from './embed.js';
 
 const WEB = path.join(ROOT, 'web');
 const MIME = {
@@ -166,6 +167,8 @@ async function handleApi(req, res, url) {
       models: config.models,
       media: toolsStatus(),
       externalApi: kglowing.status(),
+      // 케비서 iframe 으로 열렸을 때 화면이 믿을 부모 출처, 케비서가 넣어 준 값(있으면)
+      embed: { origins: embedOrigins(), provision: provisionState() },
     });
   }
 
@@ -320,6 +323,11 @@ async function handleApi(req, res, url) {
     } catch (e) {
       return json(res, e.status && e.status < 500 ? 400 : 502, { error: e.message });
     }
+  }
+  // 케비서 화면이 건넨 비밀값(Kglowing 키·노션 공용 키) — 출처 확인은 이 앱 화면(web/js/embed.js)이 하고 넘긴다.
+  if (m === 'POST' && p === '/api/provision') {
+    const r = await applyProvision(await readJson(req));
+    return json(res, 200, { ...r, notion: notionState(), externalApi: kglowing.status() });
   }
   if (m === 'POST' && p === '/api/notion/connect') return json(res, 200, { url: oauth.authorizeUrl() });
   if (m === 'POST' && p === '/api/notion/disconnect') { oauth.disconnect(); return json(res, 200, { notion: notionState() }); }
@@ -570,6 +578,8 @@ export function createServer() {
   return http.createServer({ requestTimeout: 0 }, async (req, res) => {
     try {
       if (!hostOk(req)) return json(res, 421, { error: 'host not allowed' });
+      // 이 화면을 iframe 으로 담을 수 있는 곳은 케비서뿐이다(src/embed.js).
+      res.setHeader('content-security-policy', frameAncestors());
       const url = new URL(req.url, `http://${req.headers.host}`);
       if (url.pathname === '/healthz') return json(res, 200, { ok: true, version: appVersion(), bootId: bootId() });
       if (url.pathname.startsWith('/api/')) return await handleApi(req, res, url);

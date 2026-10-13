@@ -131,6 +131,18 @@ OAuth 연결 자체를 확인할 때만 설치본을 멈추고 4325 로 띄운�
   (`POST /api/external-api/key` → `kglowing.setKey`: 캠페인 한 건으로 확인한 뒤 config.json 에 저장, 틀린 키는 저장 안 함, 빈 값=지우기).
   버튼 상태 `externalApi = kglowing.status()`(끝 네 글자만). 키가 있는데 목록을 못 받으면 [Kglowing API 확인 필요].
   개발·시험 때만 `CBS_EXTERNAL_API_KEY` 환경변수로 넣는다(파일에 적지 않는다, 있으면 화면 값보다 앞선다).
+- **케비서 iframe**(2026-10-13 사용자 지시): 케비서 「TTLabs › 컨텐츠 브리프 생성」(`/ttlab-content-brief`)이 이 화면을
+  `http://127.0.0.1:4325` 그대로 iframe 으로 담는다. 일은 지금처럼 이 PC 에서 하고, 케비서는 화면을 담고 비밀값을 넣어 준다.
+  - 담을 수 있는 곳 = `src/embed.js KEBISO_ORIGINS`(운영·dev) + `CBS_EMBED_ORIGINS`(로컬 케비서 검증용). 모든 응답에 `frame-ancestors`.
+  - 비밀값: 케비서 화면이 `postMessage kebiso:provision` → `web/js/embed.js` 가 **출처와 `e.source === window.parent`** 를 확인 →
+    `POST /api/provision`(세션 토큰) → `applyProvision`(바뀐 것만, Kglowing 키는 `setKey` 로 확인). 노션은 케비서 공용 내부 통합 키(`notion.token`)
+    → 각자 OAuth 보다 앞선다. config.json `provision.fields` 로 「kebiso 자동 설정」 을 표시한다. **레포에는 여전히 값이 없다.**
+  - 알림: iframe 안에서는 크롬이 알림 권한을 못 묻게 막아 `notify.js` 가 `cbs:notify` 로 케비서에 넘긴다(소리는 여기서).
+  - 이 화면 → 케비서 `cbs:hello`(준비 상태: Claude 로그인·확장 버전·노션·키, 비밀값 없음)는 `refreshState` 마다 다시 보낸다.
+  - 케비서가 켜기: `launch.ps1` 이 켤 때마다 HKCU `kglowing-brief://` 를 **설치본(%LOCALAPPDATA%)일 때만** 등록한다
+    (`wscript app.vbs -NoBrowser`). 시험은 `CBS_SKIP_PROTOCOL=1`.
+  - 확장은 1.3.0 부터 iframe 안에도 붙는다(`all_frames`, 앱을 탭+프레임 번호로 기억). 화면은 켤 때 `askExtension('hello')` 로 알린다.
+  - 하니스 `pw-verify/cbs-embed-check.mjs`(시험 부모 페이지가 iframe 으로 담는다).
 - **레퍼런스 검색**(`src/brief/reference.js`, 문안은 `prompts.js REFERENCE_PROMPT` — CR팀이 준 글 그대로): 스텝 하나 → 틱톡 검색어 15개(sonnet).
   {{step}} 의 칸 이름은 문안이 부르는 [행동]·[화면]·[자막]·[내레이션]·[시간]으로 고정. [새로 고침]만 직전 키워드를 덧붙여 겹치지 않게 한다.
   - **틱톡 다운로더(확장 1.1+) 연결**(`web/js/tiktok-bridge.js`, 확장 쪽은 별도 프로젝트 `Documents\tiktok-video-downloader` 의

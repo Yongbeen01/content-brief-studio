@@ -5,7 +5,11 @@
  * 처음 한 번 브라우저가 허용할지 묻는다 — [생성]을 누를 때 묻는다(누른 순간이어야 묻는 창이 뜬다).
  * 소리는 알림 소리에 기대지 않고 여기서 낸다 — 윈도우에서 크롬 알림 소리가 꺼져 있어도 들리게.
  * 그래서 알림 자체는 조용히(silent) 띄운다(소리가 두 번 나지 않게).
+ *
+ * 케비서 iframe 안에서는 크롬이 알림 권한을 묻지 못하게 막는다(다른 출처의 iframe). 그때는 케비서 화면에
+ * 넘겨 케비서가 자기 이름으로 띄운다(web/js/embed.js). 소리는 여기서 그대로 낸다.
  */
+import { isEmbedded, postToParent } from './embed.js';
 
 let audio = null;
 
@@ -15,6 +19,10 @@ export function prime() {
     audio ??= new (window.AudioContext || window.webkitAudioContext)();
     if (audio.state === 'suspended') audio.resume();
   } catch { /* 소리 없이 */ }
+  if (isEmbedded()) {
+    postToParent({ type: 'cbs:notify-prime' }); // 누른 순간이라 케비서도 권한을 물을 수 있다
+    return;
+  }
   if ('Notification' in window && Notification.permission === 'default') {
     try { Notification.requestPermission(); } catch { /* 알림 없이 */ }
   }
@@ -54,6 +62,7 @@ function chime(ok) {
  */
 export function notify(title, body, { ok = true } = {}) {
   chime(ok);
+  if (isEmbedded()) return postToParent({ type: 'cbs:notify', title, body, ok });
   if (permission() !== 'granted') return false;
   try {
     const n = new Notification(title, { body, tag: 'content-brief-studio', silent: true });
