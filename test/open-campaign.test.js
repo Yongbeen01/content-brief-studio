@@ -9,7 +9,7 @@ const blank = () => ({
   mode: 'new',
   inputs: {
     tiktokUrl: '', amazonUrl: '', productInfo: '', sellingPoints: '', concept: '',
-    uploadUrl: '', accountId: '', manualUploadUrl: '', manualAccountId: '', campaign: null,
+    uploadUrl: '', accountId: '', manualUploadUrl: '', campaign: null,
   },
   sourceIds: [],
   importSource: null,
@@ -46,12 +46,17 @@ test('초안에 남기는 캠페인 — 화면·프롬프트가 쓰는 칸만', 
 test('빈 초안 — 캠페인만 골라 둔 것(계정이 따라온 것 포함)도 빈 초안', () => {
   assert.equal(isBlankDraft(blank()), true);
   const picked = blank();
-  picked.inputs.campaign = { id: 5 };
-  picked.inputs.accountId = 'from.campaign';
+  picked.inputs.campaign = { id: 5, accountId: 'from.campaign, @two' };
+  picked.inputs.accountId = 'from.campaign, @two';
+  assert.equal(isBlankDraft(picked), true);
+  picked.inputs.manualAccountId = 'stale'; // 예전 초안에 남은 칸 값은 보지 않는다(쓰이는 값은 accountId)
   assert.equal(isBlankDraft(picked), true);
   for (const touch of [
     (d) => { d.inputs.concept = '클로즈업'; },
     (d) => { d.inputs.manualUploadUrl = 'https://forms.gle/x'; },
+    (d) => { d.inputs.accountId = 'typed.by.hand'; }, // 캠페인 없이 직접 넣은 계정
+    (d) => { d.inputs.campaign = { id: 5, accountId: 'from.campaign' }; d.inputs.accountId = 'edited'; }, // 채운 계정을 고침
+    (d) => { d.inputs.campaign = { id: 5, accountId: '' }; d.inputs.accountId = 'added'; }, // 계정 없는 캠페인에 넣음
     (d) => { d.sourceIds = ['s1']; },
     (d) => { d.doc = { blocks: [] }; },
     (d) => { d.generation = { id: 'g' }; },

@@ -70,11 +70,11 @@
           </div>
 
           <div id="new_fields">
-          <!-- 캠페인 — 파이널 리포트와 같은 검색 드롭다운. 고르면 Account ID(캠페인 hashTagAccount)와
-               업로드폼 링크(캠페인 메일 템플릿)를 가져온다(web/js/campaign.js). 브리프 이름은 받지 않는다 — 생성 뒤 자동. -->
+          <!-- 캠페인 — 파이널 리포트와 같은 검색 드롭다운. 고르면 Account ID 칸을 캠페인 hashTagAccount 로 채운다
+               (생성 전에 고칠 수 있다, web/js/campaign.js). 업로드폼 링크는 직접 넣는다. 브리프 이름은 받지 않는다 — 생성 뒤 자동. -->
           <div class="form-group" id="campaign_group">
             <label for="campaign_trigger" class="fx-required-label" data-req="campaign">캠페인</label>
-            <p class="form-hint" id="campaign_hint">고르면 Account ID 를 캠페인 정보에서 가져옵니다. 업로드폼 링크는 아래에 직접 넣어 주세요.</p>
+            <p class="form-hint" id="campaign_hint">고르면 아래 Account ID 칸을 캠페인 정보로 채웁니다(생성 전에 고칠 수 있습니다). 업로드폼 링크는 직접 넣어 주세요.</p>
             <div class="campaign-combo" id="campaign_combo">
               <button type="button" class="campaign-combo-trigger" id="campaign_trigger"
                       aria-haspopup="listbox" aria-expanded="false" aria-controls="campaign_list">
@@ -88,7 +88,6 @@
                 <ul class="campaign-combo-list" id="campaign_list" role="listbox"></ul>
               </div>
             </div>
-            <dl class="kv campaign-info hidden" id="campaign_info"></dl>
           </div>
 
           <!-- 업로드폼 링크는 늘 직접 넣는다 — 캠페인 메일에서 찾아 채우지 않는다(2026-10-12 사용자 지시). 목록을 불러오는 동안만 숨긴다 -->
@@ -110,7 +109,7 @@
             <input type="text" id="f_amazon" inputmode="url" autocomplete="off" placeholder="https://www.amazon.com/dp/…">
           </div>
 
-          <!-- 캠페인에 계정 정보가 없을 때만 보인다 -->
+          <!-- 캠페인을 고르면 그 계정으로 채워져 보인다 — 생성 전에 고칠 수 있다(목록을 못 쓰면 처음부터 직접 넣는다) -->
           <div class="form-group hidden" id="f_account_group">
             <label for="f_account" class="fx-required-label" data-req="accountId">Account ID</label>
             <p class="form-hint" id="f_account_hint">Account Tag 에 그대로 들어갑니다. 계정이 여러 개면 띄어쓰기를 누르고 이어서 쓰세요 — @ID1, @ID2 로 들어갑니다.</p>

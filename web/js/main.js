@@ -30,8 +30,8 @@ setInline(inline);
 
 const DEFAULT_PARENT = '3d439fd7477e80058995edf04a5d1586';
 /**
- * 폼 칸. 브리프 이름은 받지 않는다(생성 뒤 자동). 업로드폼 링크·Account ID 는 고른 캠페인에서 오고,
- * 캠페인에 그 값이 없을 때만 직접 넣는 칸(MANUAL)이 보인다.
+ * 폼 칸. 브리프 이름은 받지 않는다(생성 뒤 자동). 업로드폼 링크는 늘 직접 넣고(MANUAL),
+ * Account ID 는 캠페인을 고르면 캠페인 정보로 칸이 채워진다 — 생성 전에 그 칸에서 고칠 수 있다.
  */
 const FIELDS = {
   tiktokUrl: 'f_tiktok', amazonUrl: 'f_amazon', productInfo: 'f_product_info', sellingPoints: 'f_points', concept: 'f_concept',
@@ -75,7 +75,7 @@ const state = {
    * 초안·캠페인 목록이 준비되고 하던 작업이 끝나야 적용된다(applyPendingCampaign).
    */
   pendingCampaign: null,
-  /** 켜지는 과정(초안 읽기·끝난 생성 이어받기)을 마쳤는가 — 그 전에는 골라 둘 초안이 바뀔 수 있다 */
+  /** 켜지는 과정(새 초안 준비)을 마쳤는가 — 그 전에는 골라 둘 초안이 없다 */
   booted: false,
 };
 
@@ -123,7 +123,7 @@ function newDraft() {
     mode: state.draft?.mode ?? 'new',
     inputs: {
       ...Object.fromEntries(Object.keys(FIELDS).map((k) => [k, ''])),
-      uploadUrl: '', accountId: '', manualUploadUrl: '', manualAccountId: '', campaign: null,
+      uploadUrl: '', accountId: '', manualUploadUrl: '', campaign: null,
     },
     sourceIds: [],
     /** 기존 브리프 — { kind:'notion', url } 또는 { kind:'pdf', sourceId, name } */
@@ -172,20 +172,17 @@ async function saveNow(draft = state.draft) {
 
 /**
  * 지금 폼 값. uploadUrl·accountId 는 **쓰일 값**이다.
- * - accountId: 캠페인에 있으면 캠페인 것, 없으면 직접 넣은 것.
+ * - accountId: **Account ID 칸 그대로** — 캠페인을 고르면 캠페인 정보로 채워지고, 사람이 고치면 고친 값(2026-10-13 사용자 지시).
  * - uploadUrl: **늘 직접 넣은 것**(2026-10-12 사용자 지시 — 캠페인 메일에서 찾아 자동으로 채우지 않는다).
- * 직접 넣은 값은 manual* 로 따로 둔다(캠페인을 바꿨을 때 앞 캠페인 값이 칸에 남지 않게).
  */
 function readForm() {
   const v = {};
   for (const [k, id] of Object.entries(FIELDS)) v[k] = $(id).value;
-  const c = state.draft?.inputs?.campaign ?? null;
-  v.campaign = c;
+  v.campaign = state.draft?.inputs?.campaign ?? null;
   v.manualUploadUrl = $(MANUAL.uploadUrl).value.trim();
-  // 계정 여러 개 — 'a, @b'. 방금 띄운 빈 자리는 뺀다.
-  v.manualAccountId = accountValue($(MANUAL.accountId).value);
   v.uploadUrl = v.manualUploadUrl;
-  v.accountId = c?.accountId || v.manualAccountId;
+  // 계정 여러 개 — 'a, @b'. 방금 띄운 빈 자리는 뺀다.
+  v.accountId = accountValue($(MANUAL.accountId).value);
   return v;
 }
 
@@ -195,7 +192,8 @@ function fillForm(inputs) {
   const old = !inputs?.campaign;
   // 자동으로 채우던 때의 초안·아카이브는 그때 쓴 링크를 칸에 보여 준다(보이는 칸이라 확인하고 고칠 수 있다).
   $(MANUAL.uploadUrl).value = inputs?.manualUploadUrl || (old ? inputs?.uploadUrl ?? '' : inputs?.campaign?.uploadUrl ?? '');
-  $(MANUAL.accountId).value = inputs?.manualAccountId ?? (old ? inputs?.accountId ?? '' : '');
+  // accountId 는 늘 쓰인 값이다 — 칸이 숨어 있던 때(캠페인 계정을 그대로 쓰던 초안·아카이브)도 그 계정이 칸에 들어온다.
+  $(MANUAL.accountId).value = inputs?.accountId ?? '';
   renderCampaign();
 }
 
@@ -308,7 +306,8 @@ function kvRow(k, v) {
  * 캠페인 칸과 직접 넣는 칸을 지금 상태대로 그린다.
  * - 목록을 불러오는 중: 직접 넣는 칸은 숨긴다(깜빡이지 않게).
  * - 업로드폼 링크는 늘 직접 넣는다(캠페인에서 가져오지 않는다).
- * - 계정: 캠페인을 쓸 수 있으면 고른 캠페인에 계정이 없을 때만 칸이 보인다. 키가 없거나 목록을 못 받으면 예전처럼 직접 넣는다.
+ * - 계정: 캠페인을 쓸 수 있으면 캠페인을 고른 뒤에 칸이 보인다(캠페인 계정으로 채워져 있고 고칠 수 있다).
+ *   키가 없거나 목록을 못 받으면 예전처럼 처음부터 직접 넣는다.
  */
 function renderCampaign() {
   if (!picker || !state.draft) return;
@@ -328,19 +327,16 @@ function renderCampaign() {
   hint.textContent = api.configured === false
     ? '캠페인 목록을 쓰려면 오른쪽 위 [Kglowing API] 에 관리자에게 받은 키를 넣어 주세요. 그동안은 아래 칸에 직접 넣어 주세요.'
     : api.error ? `${api.error} 그동안은 아래 칸에 직접 넣어 주세요.`
-      : '고르면 Account ID 를 캠페인 정보에서 가져옵니다. 업로드폼 링크는 아래에 직접 넣어 주세요.';
-
-  const info = $('campaign_info');
-  if (c) info.replaceChildren(...kvRow('Account ID', c.accountId ? accountTag(c.accountId) : '없음 — 아래에 직접 넣어 주세요'));
-  info.classList.toggle('hidden', !c);
+      : '고르면 아래 Account ID 칸을 캠페인 정보로 채웁니다(생성 전에 고칠 수 있습니다). 업로드폼 링크는 직접 넣어 주세요.';
 
   const fallback = !loading && !mode;
-  const showAccount = fallback ? !c?.accountId : !!c && !c.accountId;
   $('f_upload_group').classList.toggle('hidden', loading);
-  $('f_account_group').classList.toggle('hidden', !showAccount);
-  $('f_account_hint').textContent = c
-    ? '이 캠페인 정보에 계정이 없습니다 — 직접 넣어 주세요. 계정이 여러 개면 띄어쓰기를 누르고 이어서 쓰세요.'
-    : 'Account Tag 에 그대로 들어갑니다. 계정이 여러 개면 띄어쓰기를 누르고 이어서 쓰세요 — @ID1, @ID2 로 들어갑니다.';
+  $('f_account_group').classList.toggle('hidden', !(fallback || c));
+  $('f_account_hint').textContent = !c
+    ? 'Account Tag 에 그대로 들어갑니다. 계정이 여러 개면 띄어쓰기를 누르고 이어서 쓰세요 — @ID1, @ID2 로 들어갑니다.'
+    : c.accountId
+      ? '캠페인 정보에서 채웠습니다 — 생성 전에 고칠 수 있습니다. 계정이 여러 개면 띄어쓰기를 누르고 이어서 쓰세요.'
+      : '이 캠페인 정보에 계정이 없습니다 — 직접 넣어 주세요. 계정이 여러 개면 띄어쓰기를 누르고 이어서 쓰세요.';
 }
 
 // 목록 요청 순번 — 켤 때 받기와 케비서가 키를 넣은 뒤 다시 받기가 겹치면 늦게 온 옛 응답(키 없음)이 새 목록을 덮는다.
@@ -368,13 +364,22 @@ async function loadCampaigns({ fresh = false } = {}) {
 }
 
 /**
- * 캠페인을 골랐다 — 계정은 목록에 있는 것을 바로 쓴다. 업로드폼 링크는 채우지 않는다(직접 넣는다 — 2026-10-12 사용자 지시.
+ * 캠페인을 골랐다 — 목록에 있는 계정으로 Account ID 칸을 채운다(생성 전에 칸에서 고칠 수 있다 — 2026-10-13 사용자 지시).
+ * 업로드폼 링크는 채우지 않는다(직접 넣는다 — 2026-10-12 사용자 지시.
  * 예전엔 캠페인 메일 템플릿에서 찾아 채웠다: 서버 `/api/campaigns/:id`·`kglowing.js findUploadForm` 은 남아 있지만 화면은 안 쓴다).
  */
 function pickCampaign(c) {
   if (state.busy || state.importJob) {
     toast('지금 하는 작업이 끝난 뒤에 바꿔 주세요');
     return;
+  }
+  const prev = state.draft.inputs?.campaign ?? null;
+  // 같은 캠페인을 다시 고르면 고친 계정을 그대로 둔다. 다른 캠페인이면 그 계정으로 — 계정이 없는 캠페인이면
+  // 앞 캠페인 계정이 칸에 남지 않게 비운다(캠페인 없이 직접 넣던 값은 둔다).
+  if (Number(prev?.id) !== Number(c.id)) {
+    const acc = $(MANUAL.accountId);
+    if (c.accountId) acc.value = accountValue(c.accountId);
+    else if (prev) acc.value = '';
   }
   state.draft.inputs = { ...state.draft.inputs, campaign: campaignForDraft(c) };
   state.draft.inputs = readForm();
@@ -1836,27 +1841,12 @@ async function openArchive(id, { note = '아카이브에서 열었습니다' } =
     await useDraft(draft);
     // 기록에 든 영어본은 이 문서에서 나온 것이다 — [영어로 보기]가 기다림 없이 나오게.
     if (fresh && state.draft.docEn) state.draft.docEnFrom = docStamp(currentDoc());
-    await saveNow(); // 이제 이 초안이 지금 초안이다(앱을 다시 켜도 여기서 시작)
+    await saveNow(); // 고친 것을 남긴다(다음에 같은 기록을 열면 이 초안이 열린다)
     toast(`${note} — ${entry.inputs?.briefName || entry.doc?.title || '(제목 없음)'}`);
     $('doc_card').scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (e) {
     toast(e.message, true);
   }
-}
-
-/**
- * 켤 때 — [생성]을 누르고 창을 닫았다가 다시 켰으면, 그사이 끝난 기획서를 바로 연다.
- * 지금 초안에서 누른 생성이고(fromDraftId), 이 초안이 아직 그 결과를 모를 때만.
- */
-async function resumeFinished() {
-  const e = state.archive[0];
-  if (!e?.fromDraftId || e.fromDraftId !== state.draft.id || state.draft.generation?.id === e.id) return;
-  try {
-    // 화면이 결과를 받았으면 그 초안에 이 생성이 적혀 있다 — 그러면 이미 본 것이다.
-    const { draft } = e.draftId ? await api('GET', `/api/drafts/${e.draftId}`) : { draft: null };
-    if (draft?.generation?.id === e.id) return;
-  } catch { return; }
-  await openArchive(e.id, { note: '창을 닫은 사이에 다 만든 기획서를 열었습니다' });
 }
 
 async function deleteArchive(it) {
@@ -2117,9 +2107,16 @@ async function useDraft(draft) {
   renderArchive();
 }
 
+/**
+ * 켤 때는 늘 빈 새 초안([새로 생성] 탭, 미리보기 없음)으로 시작한다(2026-10-13 사용자 지시) — 바탕화면 아이콘·케비서에서
+ * 열 때마다 지난번 입력과 기획서가 떠 있었다. 지난 생성(그때 입력 + 결과, 이어서 고친 것까지)은 아카이브에서 연다.
+ * 그사이 끝난 생성도 열지 않는다(아카이브 맨 위에 있다). 빈 초안은 사람이 무언가 넣어야 저장된다.
+ * 시험용 `?draft=<id>` 면 그 초안으로 시작한다 — 실화면 하니스가 미리 만들어 둔 초안을 열 때(화면에 이 길로 가는 버튼은 없다).
+ */
 async function loadDraft() {
-  const { draft } = await api('GET', '/api/drafts/current');
-  await useDraft(draft ?? newDraft());
+  const id = new URLSearchParams(window.location.search).get('draft');
+  const saved = id ? (await api('GET', `/api/drafts/${encodeURIComponent(id)}`)).draft : null;
+  await useDraft(saved ?? newDraft());
 }
 
 function startNew() {
@@ -2314,8 +2311,7 @@ function wire() {
     await loadDraft();
     loadCampaigns(); // 외부 API — 느려도 화면을 막지 않는다
     await refreshArchive();
-    await resumeFinished();
-    // 끝난 생성을 이어받으면 초안이 바뀐다 — 그 뒤에야 캠페인을 골라 둔다
+    // 초안이 준비된 뒤에야 캠페인을 골라 둔다
     state.booted = true;
     applyPendingCampaign();
     setInterval(refreshState, 30_000);

@@ -102,8 +102,13 @@ OAuth 연결 자체를 확인할 때만 설치본을 멈추고 4325 로 띄운�
   `archive/<id>.json` + 목록용 `index.json`. 기록은 고치지 않는다 — 열면 화면이 `draftId` 초안을 열어 이어서 고친다
   (그 초안이 없거나 다른 생성으로 넘어갔으면 기록으로 새 초안을 만들고 연결을 바꾼다). 초안의 `generation` 이 어느 기록에서
   왔는지 들고 있고, 이미 기획서가 있는 초안에서 다시 생성하면 **새 초안으로 갈라진다**(`main.js forkDraft`).
-  기록을 열면 폼은 늘 그 생성 때 입력으로 돌린다. 켤 때 `fromDraftId` 로 창을 닫은 사이 끝난 결과를 알아보고 바로 연다.
-  기록이 쓰는 사측 공유 파일은 폼에서 지워도 파일을 남긴다(`DELETE /api/sources`).
+  기록을 열면 폼은 늘 그 생성 때 입력으로 돌린다. 기록이 쓰는 사측 공유 파일은 폼에서 지워도 파일을 남긴다(`DELETE /api/sources`).
+- **켜면 늘 새 초안**(2026-10-13 사용자 지시, `main.js loadDraft`): 바탕화면 아이콘·케비서·새로고침 어느 쪽으로 열어도 빈 폼
+  ([새로 생성] 탭)·빈 미리보기로 시작한다. 지난 입력과 기획서는 아카이브에서 연다. 창을 닫은 사이 끝난 생성도 바로 열지 않는다
+  (예전엔 `fromDraftId` 로 알아보고 열었다 — 서버는 아직 기록만 한다). 빈 초안은 무언가 넣어야 저장되고, `GET /api/drafts/current` 는 화면이 안 쓴다.
+  아카이브에 안 남는 것(생성 전 폼, [불러오기]로 연 기존 브리프)은 다시 켜면 화면에서 안 보인다 — 파일은 `drafts/` 에 남아 있다.
+  **실화면 하니스**: 미리 만든 초안으로 시작하려면 `current.txt` 대신 주소에 `?draft=<id>`(시험용, 새로고침해도 그 초안).
+  예전 하니스(current.txt 로 초안을 심던 것)는 goto 주소에 이것을 붙여야 한다. 하니스 `pw-verify/run-fresh-account.sh`(가짜 Claude, 49항목).
 - **완료 알림**(`web/js/notify.js`): 브라우저 Notification = 윈도우 오른쪽 아래 알림. 소리는 앱이 Web Audio 로 내고 알림은 silent.
   허용 묻기·소리 켜기는 [생성]을 누른 순간에(사용자 동작이 있어야 된다).
 - **Account ID 여러 개**(`web/js/account.js`, 화면·서버 공용): 칸에는 `ID1, @ID2`, Account Tag 에는 `@ID1, @ID2`.
@@ -112,9 +117,14 @@ OAuth 연결 자체를 확인할 때만 설치본을 멈추고 4325 로 띄운�
   5분 지나면 옛 목록을 주며 뒤에서 새로 받는다). **Account ID** = `hashTagAccount` — 태그 감지용 변형 목록이라
   (`clerivy.global, CLERIVY.GLOBAL, Clerivy,global`) 대소문자·점밑줄만 다른 것과 다른 계정의 조각을 걸러 낸다(`campaignAccounts`).
   **업로드폼 링크는 늘 직접 넣는다**(2026-10-12 사용자 지시 — 캠페인을 골라도 자동으로 채우지 않는다. 계정만 캠페인에서 가져온다).
+  **계정은 칸에 채운다**(2026-10-13 사용자 지시 — 예전엔 칸을 숨기고 캠페인 계정을 그대로 썼다): 캠페인을 고르면 Account ID 칸이 보이고
+  그 캠페인 계정으로 채워진다(`pickCampaign`). 생성 전에 고칠 수 있고, 같은 캠페인을 다시 고르면 고친 값을 두며, 계정 없는 캠페인으로
+  바꾸면 칸을 비운다(앞 캠페인 계정이 남지 않게).
   예전엔 캠페인 메일 템플릿(`/mail-templates`)의 리마인드·땡큐레터 버튼에서 찾아 채웠다 — 서버 `GET /api/campaigns/:id`·`findUploadForm`
   (점수: 배송 뒤 메일 +, 영상 제출 말 +, 지원·가입 말 −)은 남아 있지만 화면은 부르지 않는다. 키가 없거나 목록을 못 받으면 둘 다 직접 넣는다.
-  폼 값: `inputs.campaign`(고른 캠페인 스냅숏) → `uploadUrl`(= `manualUploadUrl`)·`accountId` 는 **쓰일 값**, 직접 넣은 것은 `manualUploadUrl`·`manualAccountId`.
+  폼 값: `inputs.campaign`(고른 캠페인 스냅숏) → `uploadUrl`(= `manualUploadUrl`)·`accountId`(= Account ID 칸) 는 **쓰일 값**.
+  예전 초안의 `manualAccountId` 는 더 쓰지 않는다 — 그때도 `accountId` 가 쓰인 값이라 열면 그것이 칸에 들어온다.
+  케비서 캠페인 미리 고르기의 「빈 초안」 판단(`open-campaign.js isBlankDraft`)은 계정이 캠페인 계정과 다를 때만 사람이 쓴 것으로 본다.
   자동으로 채우던 때의 초안·아카이브(`campaign.uploadUrl` 만 있음)는 열 때 그 링크를 업로드폼 칸에 보여 준다(`fillForm`).
 - **브리프 이름은 받지 않는다**: 작성 결과의 `titleProduct`·`titleConcept`(영어, 스키마 맨 끝 = 내용을 다 쓴 뒤)로
   `build.js briefTitle` 이 `[BRAND]US_TikTok_<제품> _<컨셉> Guide` 를 만든다. 고치는 곳은 [노션에 최종 생성] 창의 제목 칸뿐.

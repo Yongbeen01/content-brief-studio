@@ -73,7 +73,7 @@ function writeIndex(list) {
  * 생성 한 건을 남긴다.
  * @param {object} o
  * @param {string} o.draftId   이 결과를 이어서 고칠 초안(화면이 정해 보낸다)
- * @param {string} [o.fromDraftId]  [생성]을 누른 초안 — 창을 닫았다 다시 켰을 때 그사이 끝난 결과를 알아보는 데 쓴다
+ * @param {string} [o.fromDraftId]  [생성]을 누른 초안(기록용 — 예전엔 켤 때 그사이 끝난 결과를 알아보고 바로 열었다. 2026-10-13 부터 켜면 늘 새 초안)
  * @param {object} o.inputs    생성할 때의 폼 입력
  * @param {{id:string,name:string,kind:string}[]} o.sources  그때 붙인 사측 공유 파일
  * @param {object} o.result    generateBrief 결과

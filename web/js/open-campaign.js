@@ -10,6 +10,7 @@
  *   'new-draft' 다른 내용이 있는 초안 — 그대로 저장해 두고 새 초안에서 고른다(이미 만든 기획서는 아카이브에 남는다).
  *               내용이 있는 초안의 캠페인만 바꾸면 쓴 글과 캠페인이 어긋난다(프롬프트가 캠페인을 같이 읽는다).
  */
+import { accountValue } from './account.js';
 
 /** 양의 정수만 — 아니면 null */
 export function parseCampaignId(v) {
@@ -37,14 +38,17 @@ export function campaignForDraft(c) {
   };
 }
 
-// 캠페인에서 따라오는 값(uploadUrl·accountId)과 캠페인 자체는 「사람이 쓴 것」 이 아니다.
-const DERIVED = new Set(['campaign', 'uploadUrl', 'accountId']);
+// 캠페인 자체와 따라오는 값은 「사람이 쓴 것」 이 아니다. uploadUrl 은 manualUploadUrl 과 같은 값이라 그쪽으로 본다.
+// accountId 는 아래에서 따로 — 캠페인 계정으로 채운 칸을 사람이 고칠 수 있다(2026-10-13). manualAccountId 는 예전 초안의 칸.
+const DERIVED = new Set(['campaign', 'uploadUrl', 'accountId', 'manualAccountId']);
 
-/** 사람이 아무것도 넣지 않은 초안인가 — 캠페인만 골라 둔 초안도 빈 초안이다 */
+/** 사람이 아무것도 넣지 않은 초안인가 — 캠페인만 골라 둔 초안(계정이 캠페인 그대로인 것)도 빈 초안이다 */
 export function isBlankDraft(draft) {
   if (!draft) return true;
   if (draft.doc || draft.generation || draft.importSource) return false;
   if ((draft.sourceIds ?? []).length) return false;
+  const account = accountValue(draft.inputs?.accountId);
+  if (account && account !== accountValue(draft.inputs?.campaign?.accountId)) return false;
   return Object.entries(draft.inputs ?? {}).every(([k, v]) => DERIVED.has(k) || !String(v ?? '').trim());
 }
 

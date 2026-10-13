@@ -569,12 +569,6 @@ details.card[open] > summary .fx-chevron { transform: rotate(180deg); }
 .campaign-combo-meta { font-size: 0.76rem; color: var(--fx-text-weak); line-height: 1.35; }
 .campaign-combo-option mark { background: none; color: var(--fx-blue); font-weight: 700; }
 .campaign-combo-empty { padding: 10px 12px; font-size: 0.85rem; color: var(--fx-text-weak); }
-/* 고른 캠페인에서 가져온 값 */
-.campaign-info { margin-top: 8px; background: var(--fx-sunken); grid-template-columns: 80px minmax(0, 1fr); font-size: 0.85rem; }
-.campaign-info.hidden { display: none; }
-.campaign-info dd { color: var(--fx-text); }
-.campaign-info a { color: var(--fx-blue); text-decoration: none; }
-.campaign-info a:hover { text-decoration: underline; }
 
 /* 게시 창 — 페이지 제목(자동으로 지은 이름을 여기서 고친다) */
 .publish-title { display: flex; flex-direction: column; gap: 4px; background: var(--fx-card); border-radius: var(--fx-r-sm); padding: 10px 12px; }
