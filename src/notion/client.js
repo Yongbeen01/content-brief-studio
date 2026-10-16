@@ -105,6 +105,12 @@ export function createNotionClient({
     if (method === 'PATCH' && /\/children$/.test(path)) {
       for (const r of json?.results ?? []) if (r?.id) created.add(normalizeId(r.id));
     }
+    // 이번 게시에서 만든 블록의 자식(칸 나누기 속 칸·칸 안 블록)도 이번 게시가 만든 것이다 — 한 요청에 같이 만들어져
+    // 응답에 id 가 안 온다. 그 목록을 읽을 때 기억해 두어야 거기에 이어 붙일 수 있다(publish.js appendLater).
+    const kids = method === 'GET' && path.match(/^\/v1\/blocks\/([^/?]+)\/children/);
+    if (kids && created.has(normalizeId(kids[1]))) {
+      for (const r of json?.results ?? []) if (r?.id) created.add(normalizeId(r.id));
+    }
   }
 
   async function request(method, path, body, { form } = {}) {

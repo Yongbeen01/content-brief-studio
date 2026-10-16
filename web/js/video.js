@@ -145,7 +145,8 @@ export function createVideoPanel({ root, getDoc, getDraftId, commit, toast, onRe
    */
   function filledPanel(nodeId, asset) {
     const gif = asset.mime === 'image/gif' || /\.gif$/i.test(asset.name ?? '');
-    return el('div', { class: 'vp', dataset: { vidPanel: '1' } },
+    // 하늘색 네모로 덮지 않고 그 GIF(·사진) 썸네일 위에 띄운다(paint 가 상자에 panel-over-image 를 붙인다)
+    return el('div', { class: 'vp vp-over', dataset: { vidPanel: '1', overImage: '1' } },
       el('button', {
         type: 'button', class: 'vp-btn danger', dataset: { vid: '1' }, on: { click: () => removeAsset(nodeId) },
       }, '삭제'),
@@ -239,6 +240,8 @@ export function createVideoPanel({ root, getDoc, getDraftId, commit, toast, onRe
       const panel = panelFor(nodeId);
       box.querySelector(':scope > [data-vid-panel]')?.remove();
       box.classList.toggle('has-panel', !!panel);
+      // 이미 든 GIF 의 [삭제]·[GIF 다운로드] 는 썸네일이 보이는 채로 그 위에 뜬다(app.css .panel-over-image)
+      box.classList.toggle('panel-over-image', panel?.dataset.overImage === '1');
       if (panel) box.append(panel);
     }
   }

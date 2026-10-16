@@ -140,3 +140,44 @@ test('아카이브 — [생성]을 누른 초안(fromDraftId)을 남긴다 — �
   assert.equal(archive.listArchive()[0].fromDraftId, 'olddraft01');
   assert.equal(archive.getArchive(s.id).fromDraftId, 'olddraft01');
 });
+
+test('아카이브 — 기존 브리프 불러오기도 남는다(넣은 링크·PDF), 사진은 끝날 때 채우고, 고치면 마지막 수정 시각', async () => {
+  const doc = { version: 1, title: '[OROOT] Scalp Serum Guide', origin: 'import', meta: { brand: 'OROOT' }, nodes: [{ type: 'image', id: 'im1', slot: 'photo' }] };
+  const s = archive.addImport({
+    draftId: 'impdraft01', importSource: { kind: 'notion', url: 'https://www.notion.so/abc', extra: 'x' }, result: { doc, warnings: [], infos: ['i'] },
+  });
+  assert.equal(s.kind, 'import');
+  assert.equal(s.link, 'https://www.notion.so/abc');
+  assert.equal(s.title, '[OROOT] Scalp Serum Guide');
+  assert.equal(archive.listArchive()[0].id, s.id);
+  const full = archive.getArchive(s.id);
+  assert.deepEqual(full.importSource, { kind: 'notion', url: 'https://www.notion.so/abc' });
+  assert.equal(full.draftId, 'impdraft01');
+
+  // 초안을 고쳐 저장하면 목록에 마지막 수정 시각·지금 제목
+  const at = Date.now() + 120_000;
+  assert.equal(archive.touchDraft({ id: 'impdraft01', inputs: { briefName: '' }, doc: { ...doc, title: '[OROOT] Scalp Serum Guide v2' } }, at), 1);
+  let row = archive.listArchive().find((x) => x.id === s.id);
+  assert.equal(row.editedAt, at);
+  assert.equal(row.title, '[OROOT] Scalp Serum Guide v2');
+  // 기록이 없는 초안·기획서 없는 초안은 아무것도 바꾸지 않는다
+  assert.equal(archive.touchDraft({ id: 'otherdraft', doc }), 0);
+  assert.equal(archive.touchDraft({ id: 'impdraft01' }), 0);
+
+  // 사진을 다 받아 기록을 채워도 마지막 수정 표시는 남는다
+  const filled = { ...doc, nodes: [{ ...doc.nodes[0], asset: { id: 'a1' } }] };
+  archive.updateEntry(s.id, { doc: filled, warnings: ['w'] });
+  assert.equal(archive.getArchive(s.id).doc.nodes[0].asset.id, 'a1');
+  row = archive.listArchive().find((x) => x.id === s.id);
+  assert.equal(row.editedAt, at);
+  assert.equal(row.kind, 'import');
+
+  // PDF 로 불러오면 그 PDF 를 지우지 않게 남긴다
+  const p = archive.addImport({
+    draftId: 'impdraft02', importSource: { kind: 'pdf', sourceId: 'bbbbbbbbbbbbbbbb', name: 'brief.pdf' }, sources: [{ id: 'bbbbbbbbbbbbbbbb', name: 'brief.pdf', kind: 'pdf' }], result: { doc },
+  });
+  assert.equal(p.fileName, 'brief.pdf');
+  assert.equal(p.link, '');
+  assert.ok(archive.archivedSourceIds().has('bbbbbbbbbbbbbbbb'));
+  assert.equal(archive.updateEntry('cccccccccccccccc', {}), null);
+});

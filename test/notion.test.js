@@ -38,6 +38,18 @@ function fakeNotion({ failAppendAt = -1 } = {}) {
   let appends = 0;
   const maxDepth = (list) => (list?.length ? 1 + Math.max(...list.map((b) => maxDepth(b[b.type]?.children))) : 0);
   const maxLen = (list) => (list?.length ? Math.max(list.length, ...list.map((b) => maxLen(b[b.type]?.children))) : 0);
+  const kids = new Map(); // id → 만든 자식 [{id, type}] (GET /children 흉내)
+  const invalid = (list) => {
+    for (const b of list ?? []) {
+      const ch = b[b.type]?.children;
+      if (b.type === 'column_list' && (ch?.length ?? 0) < 2) return `body.children.column_list.children.length should be ≥ \`2\`, instead was \`${ch?.length ?? 0}\``;
+      if (b.type === 'column' && !ch?.length) return 'column must have children';
+      if (b.type === 'table' && !ch?.length) return 'table must have rows';
+      const w = invalid(ch);
+      if (w) return w;
+    }
+    return '';
+  };
 
   const fetchImpl = async (url, init) => {
     const u = new URL(url);
@@ -54,6 +66,9 @@ function fakeNotion({ failAppendAt = -1 } = {}) {
     if (init.method === 'PATCH' && u.pathname.endsWith('/children')) {
       appends += 1;
       if (appends === failAppendAt) return { ok: false, status: 400, text: async () => JSON.stringify({ code: 'validation_error', message: 'boom' }), headers: new Headers() };
+      // 노션이 거절하는 모양(칸 하나짜리 칸 나누기·빈 칸·줄 없는 표)은 실제처럼 400
+      const why = invalid(body.children);
+      if (why) return { ok: false, status: 400, text: async () => JSON.stringify({ code: 'validation_error', message: why }), headers: new Headers() };
       // 요청 하나에 중첩 2단(자식의 자식의 자식은 없어야), 배열 100개까지
       entry.depth = maxDepth(body.children) - 1;
       entry.len = maxLen(body.children);
@@ -61,7 +76,18 @@ function fakeNotion({ failAppendAt = -1 } = {}) {
       const results = body.children.map((b) => ({ id: newId(), type: b.type }));
       (tree.get(parent) ?? tree.set(parent, []).get(parent)).push(...results.map((r) => r.type));
       results.forEach((r) => tree.set(r.id.replace(/-/g, ''), []));
+      // 같은 요청에 들어 있던 자식들도 블록이 된다 — GET /children 으로 읽을 수 있게 남긴다
+      const keep = (id, list) => {
+        const made = list.map((b) => ({ id: newId(), type: b.type, b }));
+        kids.set(id, [...(kids.get(id) ?? []), ...made.map(({ id: k, type }) => ({ id: k, type }))]);
+        made.forEach(({ id: k, b }) => keep(k.replace(/-/g, ''), b[b.type]?.children ?? []));
+      };
+      kids.set(parent, [...(kids.get(parent) ?? []), ...results]);
+      results.forEach((r, i) => keep(r.id.replace(/-/g, ''), body.children[i][body.children[i].type]?.children ?? []));
       return ok({ results });
+    }
+    if (init.method === 'GET' && /^\/v1\/blocks\/[^/]+\/children$/.test(u.pathname)) {
+      return ok({ results: kids.get(u.pathname.split('/')[3].replace(/-/g, '')) ?? [], has_more: false });
     }
     if (init.method === 'POST' && u.pathname === '/v1/file_uploads') { entry.body = body; return ok({ id: newId(), upload_url: 'x' }); }
     if (init.method === 'POST' && /\/send$/.test(u.pathname)) {
@@ -73,7 +99,9 @@ function fakeNotion({ failAppendAt = -1 } = {}) {
     if (init.method === 'PATCH' && u.pathname.startsWith('/v1/pages/')) { entry.archived = body.archived; return ok({}); }
     return { ok: false, status: 404, text: async () => '{}', headers: new Headers() };
   };
-  return { fetchImpl, log, tree };
+  return {
+    fetchImpl, log, tree, kids,
+  };
 }
 
 const client = (fake, extra = {}) => createNotionClient({
@@ -319,4 +347,87 @@ test('팀 설정 코드 · OAuth 교환과 갱신', async () => {
   saveUserConfig({ notion: { token: '' } });
   oauth.disconnect();
   assert.equal(oauth.status().connected, false);
+});
+
+test('게시: 칸 안 내용이 깊어도 칸 나누기를 칸 하나로 보내지 않는다(노션 400 「column_list ≥ 2」로 게시가 통째로 실패했다)', async () => {
+  // 불러온 브리프 흉내 — 칸 나누기의 오른쪽 칸에 들여쓴 목록·박스·표가 있다
+  const doc = {
+    version: 1,
+    title: '[X] Deep columns',
+    lang: 'en',
+    origin: 'import',
+    meta: {},
+    nodes: [
+      { type: 'heading', id: 'h1', level: 2, text: 'Scenes' },
+      {
+        type: 'columns',
+        id: 'c1',
+        columns: [
+          [{ type: 'image', id: 'im1', slot: 'photo', label: '사진', ratio: 1, asset: { id: 'a1' } }],
+          [
+            { type: 'bulleted', id: 'b1', items: ['parent', 'child', 'grandchild'], levels: [0, 1, 2] },
+            { type: 'callout', id: 'co', icon: '💡', color: 'gray_background', children: [{ type: 'paragraph', id: 'p1', text: 'inside' }] },
+            { type: 'table', id: 't1', header: true, rows: [['A', 'B'], ['1', '2']] },
+            { type: 'paragraph', id: 'p2', text: 'after table' },
+          ],
+        ],
+      },
+      { type: 'paragraph', id: 'p3', text: 'end' },
+    ],
+  };
+  const fake = fakeNotion();
+  const c = client(fake);
+  const res = await publishDoc({
+    doc, client: c, readAsset: () => ({ data: Buffer.from('png'), mime: 'image/png', name: 'a.png' }), parentPageId: PARENT, translate: async (d) => d,
+  });
+  const appends = fake.log.filter((e) => e.method === 'PATCH' && e.path.endsWith('/children'));
+  for (const a of appends) assert.ok(a.depth <= 2, `depth ${a.depth}`);
+  const page = res.pageId.replace(/-/g, '');
+  const kidsOf = (id) => fake.kids.get(id.replace(/-/g, '')) ?? [];
+  assert.deepEqual(kidsOf(page).map((k) => k.type), ['heading_2', 'column_list', 'paragraph']);
+  const cl = kidsOf(page)[1];
+  const [left, right] = kidsOf(cl.id);
+  assert.deepEqual(kidsOf(left.id).map((k) => k.type), ['image']);
+  // 오른쪽 칸: 목록 → 박스 → 표 → 글, 순서 그대로
+  assert.deepEqual(kidsOf(right.id).map((k) => k.type), ['bulleted_list_item', 'callout', 'table', 'paragraph']);
+  const [li, callout, table] = kidsOf(right.id);
+  assert.deepEqual(kidsOf(li.id).map((k) => k.type), ['bulleted_list_item']); // 들여쓴 하위 항목
+  assert.deepEqual(kidsOf(kidsOf(li.id)[0].id).map((k) => k.type), ['bulleted_list_item']); // 그 아래
+  assert.deepEqual(kidsOf(callout.id).map((k) => k.type), ['paragraph']);
+  assert.equal(kidsOf(table.id).length, 2);
+});
+
+test('나누기: 칸 나누기는 칸을 전부 보내고, 칸 안 블록의 자식만 나중에', () => {
+  const leaf = { type: 'paragraph', paragraph: { rich_text: [] } };
+  const deep = { type: 'bulleted_list_item', bulleted_list_item: { rich_text: [], children: [leaf] } };
+  const cols = {
+    type: 'column_list',
+    column_list: {
+      children: [
+        { type: 'column', column: { children: [leaf] } },
+        { type: 'column', column: { children: [leaf, deep] } },
+      ],
+    },
+  };
+  const { send, rest, later } = splitForRequest(cols);
+  assert.equal(depth(send), 2);
+  assert.equal(send.column_list.children.length, 2);
+  assert.deepEqual(rest, []);
+  assert.deepEqual(later.map((l) => [l.col, l.at, l.blocks.length]), [[1, 1, 1]]);
+});
+
+test('쓰기 가드: 만든 블록의 자식은 읽은 뒤 이어 붙일 수 있고, 남의 블록 자식은 여전히 막힌다', async () => {
+  const fake = fakeNotion();
+  const c = client(fake);
+  const page = await c.createPage('ok');
+  const made = await c.appendChildren(page.id, [{
+    object: 'block', type: 'column_list', column_list: { children: [{ type: 'column', column: { children: [{ type: 'paragraph', paragraph: { rich_text: [] } }] } }, { type: 'column', column: { children: [{ type: 'paragraph', paragraph: { rich_text: [] } }] } }] },
+  }]);
+  const cols = await c.listChildren(made.results[0].id);
+  await c.appendChildren(cols[0].id, [{ object: 'block', type: 'paragraph', paragraph: { rich_text: [] } }]);
+  // 남의 블록은 목록을 읽어도 그 자식에 붙일 수 없다
+  const other = '3c039fd7477e808690f7f1727b753b09';
+  fake.kids.set(other, [{ id: '99999999-0000-4000-8000-000000000000', type: 'paragraph' }]);
+  const theirs = await c.listChildren(other);
+  await assert.rejects(c.appendChildren(theirs[0].id, []), GuardError);
 });

@@ -11,7 +11,7 @@ process.env.CBS_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'cbs-import-'));
 const { recordMapToBlocks, readApiBrief, segmentsToMarkdown, escapeMd } = await import('../src/sources/notion-blocks.js');
 const { blocksToDoc, detectLang, importBrief, parseSeconds } = await import('../src/brief/import.js');
 const {
-  markdownToBlocks, pdfImageList, pdfLinks, transcribePdf,
+  markdownToBlocks, pdfImageList, pdfLinks, repairImageNumbers, transcribePdf,
 } = await import('../src/brief/import-pdf.js');
 const { pdfImageTable, decodePdfImage } = await import('../src/sources/pdf-images.js');
 const { docToBlocks } = await import('../src/notion/convert.js');
@@ -404,4 +404,78 @@ test('불러오기 흐름: 글을 먼저 내보내고, 사진은 받는 대로 �
   assert.deepEqual(Object.values(res.assets)[0], { asset: { id: 'a1', name: 'ok.png', mime: 'image/png', size: 3 }, ratio: 1.5 });
   assert.ok(res.warnings.some((w) => /사진 1장은 가져오지 못해/.test(w)));
   assert.equal(res.docEn.lang, 'en');
+});
+
+// ── 같은 사진을 두 자리에 쓴 PDF · 사진 번호 바로잡기 (2026-10-16) ──────────────
+
+test('PDF: 같은 사진을 두 자리에 그리면 자리마다 하나씩 센다(하나로 세면 다음 GIF 번호가 앞당겨진다)', () => {
+  const objs = {};
+  const raw = zlib.deflateSync(Buffer.alloc(300 * 200 * 3, 90));
+  const stream = (text) => ({ head: `<< /Length ${Buffer.byteLength(text, 'latin1')}>>`, data: Buffer.from(text, 'latin1') });
+  objs[1] = { head: '<</Type /Catalog /Pages 2 0 R>>' };
+  objs[2] = { head: '<</Type /Pages /Kids [3 0 R] /Count 1>>' };
+  objs[3] = { head: '<</Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources <</XObject <</ImA 10 0 R /ImB 11 0 R>>>> /Contents 5 0 R>>' };
+  // 위에서부터 A · B · A(같은 사진 다시) · B 아래 하나 더 없음
+  objs[5] = stream('q 300 0 0 200 50 560 cm /ImA Do Q\nq 300 0 0 200 50 340 cm /ImB Do Q\nq 300 0 0 200 50 120 cm /ImA Do Q');
+  objs[10] = { head: `<</Type /XObject /Subtype /Image /Width 300 /Height 200 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /Length ${raw.length}>>`, data: raw };
+  objs[11] = { head: `<</Type /XObject /Subtype /Image /Width 300 /Height 200 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /Length ${raw.length}>>`, data: raw };
+  let out = '%PDF-1.4\n';
+  for (const [n, o] of Object.entries(objs)) {
+    out += `${n} 0 obj\n${o.head}\n`;
+    if (o.data) out += `stream\n${o.data.toString('latin1')}\nendstream\n`;
+    out += 'endobj\n';
+  }
+  out += 'trailer\n<</Root 1 0 R>>\n%%EOF\n';
+  const list = pdfImageList(Buffer.from(out, 'latin1'));
+  assert.deepEqual(list.map((im) => [im.n, im.obj]), [[1, '10'], [2, '11'], [3, '10']]);
+});
+
+test('PDF: Claude 가 같은 사진 번호를 두 자리에 적으면 앞뒤 번호 사이의 안 쓴 번호로 바로잡는다', () => {
+  const nums = (md, total) => {
+    const blocks = markdownToBlocks(md);
+    const fixed = repairImageNumbers(blocks, total);
+    const out = [];
+    const walk = (list) => { for (const b of list) { if (b.t === 'image') out.push(b.src?.n ?? null); walk(b.children ?? []); (b.columns ?? []).forEach(walk); } };
+    walk(blocks);
+    return { fixed, out };
+  };
+  const md = (...ns) => ns.map((n) => `![x](image:${n})`).join('\n\n');
+  // 다음 GIF(3)를 앞당겨 적고 제자리에도 적음 → 앞 자리가 2
+  assert.deepEqual(nums(md(1, 3, 3, 4), 4), { fixed: 1, out: [1, 2, 3, 4] });
+  // 앞 GIF(2)를 다음 자리에 또 적음 → 뒤 자리가 3
+  assert.deepEqual(nums(md(1, 2, 2, 4), 4), { fixed: 1, out: [1, 2, 3, 4] });
+  // 맞는 번호가 없으면 빈 번호(0) — 엉뚱한 사진 대신 회색 자리
+  assert.deepEqual(nums(md(1, 2, 2), 2), { fixed: 1, out: [1, 2, 0] });
+  // 겹친 번호가 없으면 그대로(칸 나누기로 순서가 바뀐 것은 Claude 판단을 믿는다)
+  assert.deepEqual(nums(md(2, 1, 3), 3), { fixed: 0, out: [2, 1, 3] });
+  // 칸 나누기 안도 본다
+  const cols = ['<columns>', '<column>', '![a](image:1)', '</column>', '<column>', '![b](image:1)', '</column>', '</columns>', '', '![c](image:3)'].join('\n');
+  assert.deepEqual(nums(cols, 3), { fixed: 1, out: [1, 2, 3] });
+});
+
+test('노션 API: 파일 주소를 주지 않는 사진은 빈 자리가 아니라 회색 자리 + 경고', async () => {
+  const client = {
+    retrievePage: async () => ({ properties: { title: { type: 'title', title: [{ plain_text: '[X] Page' }] } } }),
+    listChildren: async (id) => (id === 'page' ? [
+      { id: 'i1', type: 'image', has_children: false, image: { caption: [] } },
+      { id: 'i2', type: 'image', has_children: false, image: { type: 'external', external: { url: 'https://cdn/x.png' } } },
+    ] : []),
+  };
+  const got = await readApiBrief(client, 'page');
+  assert.deepEqual(got.blocks.map((b) => b.src), [{ kind: 'missing' }, { kind: 'url', url: 'https://cdn/x.png' }]);
+  const { doc } = blocksToDoc(got.blocks, { title: got.title });
+  const slots = imageSlots(doc);
+  assert.equal(slots.length, 2);
+  assert.ok(slots.every((s) => !s.node.optional), '두 자리 모두 노션에 올라간다(회색이라도)');
+  const res = await importBrief({
+    read: async () => ({
+      ...got,
+      imageGetter: async () => async (src) => {
+        if (src.kind === 'missing') throw new Error('노션이 사진 주소를 주지 않았습니다');
+        return { data: Buffer.from('x'), mime: 'image/png', width: 10, height: 10, name: 'x.png' };
+      },
+    }),
+    saveImage: () => ({ id: 'a1', name: 'x.png', mime: 'image/png', size: 1 }),
+  });
+  assert.ok(res.warnings.some((w) => /사진 1장은 가져오지 못해 .*노션이 사진 주소를 주지 않았습니다/.test(w)), res.warnings.join(' | '));
 });

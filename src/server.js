@@ -26,6 +26,7 @@ import { translateDoc } from './brief/translate.js';
 import { importBrief } from './brief/import.js';
 import { transcribePdf } from './brief/import-pdf.js';
 import { readApiBrief, readNotionBrief } from './sources/notion-blocks.js';
+import { fillAssets } from '../web/js/doc.js';
 import { isNotionUrl } from './sources/notion-public.js';
 import { publishDoc } from './notion/publish.js';
 import { notionClient } from './notion/index.js';
@@ -370,7 +371,10 @@ async function handleApi(req, res, url) {
   if (m === 'PUT' && p.startsWith('/api/drafts/')) {
     const body = await readJson(req, 16 * 1024 * 1024);
     if (body.draft?.id !== p.split('/').pop()) return json(res, 400, { error: '초안 id 가 다릅니다.' });
-    return json(res, 200, { updatedAt: store.saveDraft(body.draft).updatedAt });
+    const { updatedAt } = store.saveDraft(body.draft);
+    // 이 초안으로 이어서 고치는 아카이브 기록이 있으면 목록에 마지막 수정 시각을 적는다(실패해도 저장은 된 것이다).
+    try { archive.touchDraft(body.draft, updatedAt); } catch { /* 목록 표시만 늦는다 */ }
+    return json(res, 200, { updatedAt });
   }
 
   if (m === 'POST' && p === '/api/assets') {
@@ -539,16 +543,46 @@ async function handleApi(req, res, url) {
       readLabel = 'Claude 가 PDF 를 옮겨 적는 중 (2~3분)';
       read = null; // 작업 폴더가 있어야 해서 아래에서 만든다
     }
-    const job = startJob('import', ({ progress, signal, dir }) => importBrief({
-      read: read ?? (() => transcribePdf({ file: sources.getSourceFile(body.sourceId), jobDir: dir, signal, onProgress: progress })),
-      saveImage: (img) => {
-        const meta = store.saveAsset(img);
-        return { id: meta.id, name: meta.name, mime: meta.mime, size: meta.size };
-      },
-      onProgress: progress,
-      signal,
-      readLabel,
-    }));
+    const pdf = body.url ? null : sources.getSource(body.sourceId);
+    const importSource = pdf
+      ? { kind: 'pdf', sourceId: pdf.id, name: pdf.name }
+      : { kind: 'notion', url: String(body.url).trim() };
+    const job = startJob('import', ({ progress, signal, dir }) => {
+      // 글이 나오는 순간 아카이브에 남긴다 — 사진을 받는 동안 창을 닫아도 넣은 링크와 브리프가 남는다.
+      // 화면은 이 기록을 이어서 고칠 초안(draftId)을 정해 보낸다. 사진은 다 받은 뒤 그 기록에 채운다.
+      let saved = null;
+      const onProgress = (pr) => {
+        if (pr.data?.doc && !saved) {
+          try {
+            saved = archive.addImport({
+              draftId: body.draftId, importSource, sources: pdf ? [pdf] : [], result: pr.data,
+            });
+          } catch { /* 기록을 못 남겨도 불러오기는 이어 간다 */ }
+          if (saved) pr = { ...pr, data: { ...pr.data, archive: saved } };
+        }
+        progress(pr);
+      };
+      return importBrief({
+        read: read ?? (() => transcribePdf({ file: sources.getSourceFile(body.sourceId), jobDir: dir, signal, onProgress: progress })),
+        saveImage: (img) => {
+          const meta = store.saveAsset(img);
+          return { id: meta.id, name: meta.name, mime: meta.mime, size: meta.size };
+        },
+        onProgress,
+        signal,
+        readLabel,
+      }).then((r) => {
+        if (saved) {
+          saved = archive.updateEntry(saved.id, {
+            doc: fillAssets(r.doc, r.assets).doc,
+            docEn: r.docEn ? fillAssets(r.docEn, r.assets).doc : null,
+            warnings: r.warnings,
+            infos: r.infos,
+          }) ?? saved;
+        }
+        return { ...r, archive: saved };
+      });
+    });
     return json(res, 200, { jobId: job.id });
   }
   if (m === 'POST' && p === '/api/publish') {

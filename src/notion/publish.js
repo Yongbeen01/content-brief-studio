@@ -24,15 +24,62 @@ export function depth(b) {
   return kids.length ? 1 + Math.max(...kids.map(depth)) : 0;
 }
 
-/** 한 요청에 보낼 모양(자식은 깊이 1 이하인 앞부분까지)과 나중에 붙일 나머지. */
+const withoutKids = (b) => {
+  const body = { ...b[b.type] };
+  delete body.children;
+  return { ...b, [b.type]: body };
+};
+
+/**
+ * 한 요청에 보낼 모양과 나중에 붙일 것.
+ * - 보통 블록: 자식은 깊이 1 이하인 앞부분까지 보내고, 나머지(rest)는 만든 블록에 이어 붙인다.
+ * - 칸 나누기(column_list): 칸을 나눠 보내면 안 된다 — 노션은 칸이 둘 이상인 칸 나누기만 받는다(칸 하나로 보내면
+ *   「column_list.children.length should be ≥ 2」로 게시 전체가 실패했다). 칸은 전부 보내고, 칸 안 블록의
+ *   자식(들여쓴 목록·박스 안 내용 등)만 떼어 뒀다가(later) 만든 블록에 이어 붙인다.
+ */
 export function splitForRequest(b) {
-  if (depth(b) <= 2) return { send: b, rest: [] };
+  if (depth(b) <= 2) return { send: b, rest: [], later: [] };
   const kids = kidsOf(b);
+  if (b.type === 'column_list') {
+    const later = [];
+    const columns = kids.map((col, c) => {
+      const inner = kidsOf(col);
+      // 표는 줄(자식)과 함께 만들어야 한다 — 칸 안의 표부터는 만든 칸에 통째로 이어 붙인다.
+      const table = inner.findIndex((x) => x.type === 'table');
+      const cut = Math.min(MAX_CHILDREN, table < 0 ? inner.length : table);
+      const send = inner.slice(0, cut).map((x, i) => {
+        if (!kidsOf(x).length) return x;
+        later.push({ col: c, at: i, blocks: kidsOf(x) });
+        return withoutKids(x);
+      });
+      if (cut < inner.length) later.push({ col: c, at: -1, blocks: inner.slice(cut) });
+      // 노션은 빈 칸을 받지 않는다 — 표로 시작하는 칸은 빈 줄 하나로 연다.
+      if (!send.length) send.push({ object: 'block', type: 'paragraph', paragraph: { rich_text: [] } });
+      return { ...col, column: { ...col.column, children: send } };
+    });
+    return { send: { ...b, column_list: { ...b.column_list, children: columns } }, rest: [], later };
+  }
   let k = 0;
   while (k < kids.length && depth(kids[k]) <= 1) k += 1;
   const send = { ...b, [b.type]: { ...b[b.type], children: kids.slice(0, k) } };
   if (!k) delete send[b.type].children;
-  return { send, rest: kids.slice(k) };
+  return { send, rest: kids.slice(k), later: [] };
+}
+
+/** 칸 나누기에서 떼어 둔 것을 붙인다 — 칸·칸 안 블록의 id 는 만든 칸 나누기의 자식 목록을 읽어 얻는다. */
+async function appendLater(client, columnListId, later, tick) {
+  const cols = (await client.listChildren(columnListId)).map((r) => r.id);
+  const byCol = new Map();
+  for (const l of later) byCol.set(l.col, [...(byCol.get(l.col) ?? []), l]);
+  for (const [c, list] of byCol) {
+    if (!cols[c]) throw new Error('노션이 만든 칸 id 를 돌려주지 않았습니다.');
+    const inner = list.some((l) => l.at >= 0) ? (await client.listChildren(cols[c])).map((r) => r.id) : [];
+    for (const l of list) {
+      const target = l.at < 0 ? cols[c] : inner[l.at];
+      if (!target) throw new Error('노션이 만든 블록 id 를 돌려주지 않았습니다.');
+      await appendTree(client, target, l.blocks, tick);
+    }
+  }
 }
 
 export async function appendTree(client, parentId, blocks, tick = () => {}) {
@@ -42,9 +89,10 @@ export async function appendTree(client, parentId, blocks, tick = () => {}) {
     tick(chunk.length);
     const ids = (res?.results ?? []).map((r) => r.id);
     for (let j = 0; j < chunk.length; j += 1) {
-      if (!chunk[j].rest.length) continue;
+      if (!chunk[j].rest.length && !chunk[j].later.length) continue;
       if (!ids[j]) throw new Error('노션이 만든 블록 id 를 돌려주지 않았습니다.');
-      await appendTree(client, ids[j], chunk[j].rest, tick);
+      if (chunk[j].rest.length) await appendTree(client, ids[j], chunk[j].rest, tick);
+      if (chunk[j].later.length) await appendLater(client, ids[j], chunk[j].later, tick);
     }
   }
 }

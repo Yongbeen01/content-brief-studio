@@ -633,7 +633,7 @@ export async function importBrief({
   };
   await Promise.all(Array.from({ length: Math.min(parallel, pending.length) }, worker));
   if (signal?.aborted) throw Object.assign(new Error('멈췄습니다.'), { kind: 'cancelled' });
-  if (failed.length) warnings.push(`사진 ${failed.length}장은 가져오지 못해 회색 자리로 두었습니다 — 눌러서 넣어 주세요 (${failed[0]})`);
+  if (failed.length) warnings.push(`사진 ${failed.length}장은 가져오지 못해 회색 자리로 두었습니다 — 눌러서 넣어 주세요 (${[...new Set(failed)].join(' · ')})`);
   else if (pending.length) infos.push(`사진 ${pending.length}장을 원본에서 가져왔습니다`);
   return { ...first, warnings, infos, assets };
 }

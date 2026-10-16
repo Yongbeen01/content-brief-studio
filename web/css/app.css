@@ -656,6 +656,18 @@ details.card[open] > summary .fx-chevron { transform: rotate(180deg); }
 /* 패널은 상자 내용을 덮기만 한다 — 패널이 빠지면 원래 모습(넣은 GIF)이 돌아온다. */
 .n-slot.has-panel > * { grid-area: 1 / 1; }
 .n-slot.has-panel > :not([data-vid-panel]) { visibility: hidden; }
+/* 이미 GIF(·사진)가 든 자리를 눌렀을 때 — 하늘색 네모로 덮지 않고 썸네일은 그대로 보인 채 [삭제]·[GIF 다운로드]만
+   그 위 가운데에 흰 카드로 뜬다. (.notion-doc 를 붙여 위의 하늘색 바탕 규칙을 이긴다) */
+.notion-doc .n-slot.has-panel.panel-over-image { background: transparent; padding: 0; }
+.n-slot.has-panel.panel-over-image > :not([data-vid-panel]) { visibility: visible; }
+.n-slot.panel-over-image .n-slot-undo { display: none !important; }
+.vp.vp-over {
+  position: relative; z-index: 1;
+  width: auto; min-width: 150px; max-width: calc(100% - 16px);
+  padding: 10px; border-radius: var(--fx-r-sm);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: var(--fx-shadow-pop);
+}
 .vp { display: flex; flex-direction: column; gap: 6px; width: 100%; }
 .vp-head { font-size: 0.82rem; font-weight: 600; color: var(--fx-text-weak); }
 .vp-btn {

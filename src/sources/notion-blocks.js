@@ -288,8 +288,10 @@ function apiConv(b, kids, rows) {
     }
     case 'divider': return [{ t: 'divider' }];
     case 'image': {
+      // 노션이 파일 주소를 주지 않는 사진도 있다(API 로 읽으면 image 에 caption 만 온다). 사진이 있던 자리이므로
+      // 빈 자리(optional — 노션에 올리지 않는다)가 아니라 회색 자리로 두고 경고한다.
       const url = p.type === 'file' ? p.file?.url : p.external?.url;
-      return [{ t: 'image', src: url ? { kind: 'url', url } : null, ratio: 0 }];
+      return [{ t: 'image', src: url ? { kind: 'url', url } : { kind: 'missing' }, ratio: 0 }];
     }
     case 'embed':
     case 'bookmark':
@@ -336,7 +338,12 @@ export async function readApiBrief(client, pageId, { maxDepth = 8 } = {}) {
 
 // ── 사진 받기 ───────────────────────────────────────────────────────────────
 
-export const MAX_IMAGE_BYTES = 20 * 1024 * 1024; // 노션 한 번 올리기 한도
+/**
+ * 불러올 사진 한 장의 상한. 브리프의 참고 GIF 는 20~40MB 가 흔하다(예전 20MB 상한에 걸려 회색 자리로 남고 노션에도
+ * 회색으로 올라갔다). 노션 게시는 20MB 가 넘으면 나눠 올린다(notion/client.js).
+ */
+export const MAX_IMAGE_BYTES = 100 * 1024 * 1024;
+const OVER_LIMIT = `${MAX_IMAGE_BYTES / 1024 / 1024}MB 를 넘습니다`;
 
 const NEEDS_SIGN = /^attachment:|amazonaws\.com|prod-files-secure|secure\.notion-static\.com|file\.notion\.so/i;
 
@@ -349,9 +356,9 @@ async function fetchBuffer(url, { fetchImpl, signal, timeoutMs = 90_000 }) {
     const res = await fetchImpl(url, { signal: ctl.signal, redirect: 'follow' });
     if (!res.ok) throw new Error(`받지 못했습니다 (${res.status})`);
     const len = Number(res.headers?.get?.('content-length'));
-    if (len > MAX_IMAGE_BYTES) throw new Error('20MB 를 넘습니다');
+    if (len > MAX_IMAGE_BYTES) throw new Error(OVER_LIMIT);
     const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length > MAX_IMAGE_BYTES) throw new Error('20MB 를 넘습니다');
+    if (buf.length > MAX_IMAGE_BYTES) throw new Error(OVER_LIMIT);
     return buf;
   } finally {
     clearTimeout(timer);
@@ -400,7 +407,10 @@ export async function readNotionBrief(url, { viaApi, fetchImpl = fetch } = {}) {
     ...got,
     imageGetter: async (srcs) => {
       const resolve = await prepareImageUrls(srcs, got.base, { fetchImpl });
-      return (src) => fetchImage(resolve(src), { fetchImpl });
+      return async (src) => {
+        if (src?.kind === 'missing') throw new Error('노션이 사진 주소를 주지 않았습니다');
+        return fetchImage(resolve(src), { fetchImpl });
+      };
     },
   };
 }

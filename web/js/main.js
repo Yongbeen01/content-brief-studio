@@ -268,6 +268,7 @@ function refreshFormState() {
     if (!src) setStatus('form_status', '노션 링크를 붙여넣거나 PDF 를 올려 주세요', 'warn');
     else if (pdfBusy) setStatus('form_status', 'PDF 를 여는 중입니다 — 끝나면 불러올 수 있습니다', 'busy');
     else if (pdfBad) setStatus('form_status', s?.error || 'PDF 를 다시 올려 주세요', 'bad');
+    else if (state.draft.generation) setStatus('form_status', '다시 누르면 새로 불러옵니다(지금 브리프는 고친 것까지 아카이브에 그대로 남습니다)');
     else setStatus('form_status', state.draft.doc ? '다시 누르면 지금 미리보기 대신 불러온 브리프가 들어갑니다(지금 미리보기는 되돌리기로 살릴 수 있습니다)' : '');
     return;
   }
@@ -1000,9 +1001,14 @@ function forkDraft(id) {
   clearTimeout(saveTimer);
   const old = state.draft;
   const gen = old.generation;
-  const kept = {
-    ...old, mode: 'new', importSource: null, inputs: clone(gen.inputs), sourceIds: [...(gen.sourceIds ?? old.sourceIds)],
-  };
+  // 불러온 브리프의 기록이면 앞 초안은 [기존 브리프 업로드] 탭·넣었던 링크 그대로 남긴다.
+  const kept = gen.kind === 'import'
+    ? {
+      ...old, mode: 'import', importSource: clone(gen.importSource ?? old.importSource), inputs: clone(gen.inputs ?? old.inputs), sourceIds: [...(gen.sourceIds ?? old.sourceIds)],
+    }
+    : {
+      ...old, mode: 'new', importSource: null, inputs: clone(gen.inputs), sourceIds: [...(gen.sourceIds ?? old.sourceIds)],
+    };
   api('PUT', `/api/drafts/${kept.id}`, { draft: kept }).catch((e) => toast(`앞 기획서를 저장하지 못했습니다 — ${e.message}`, true));
   state.draft = {
     ...newDraft(),
@@ -1018,13 +1024,22 @@ function forkDraft(id) {
 
 // ── 기존 브리프 불러오기 ────────────────────────────────────────────────────
 
-/** 불러온 글을 미리보기에 올린다. 제목은 원래 제목 그대로(바꾸려면 [노션에 최종 생성] 창에서). */
-function showImported(r) {
-  // 생성한 기획서가 있던 초안이면 새 초안으로 — 앞의 기획서는 아카이브에서 그대로 열린다.
-  if (state.draft.generation) forkDraft(uid() + uid());
+/**
+ * 불러온 글을 미리보기에 올린다. 제목은 원래 제목 그대로(바꾸려면 [노션에 최종 생성] 창에서).
+ * forkId = 불러오기를 누를 때 정한 새 초안 id — 생성한 기획서·불러온 브리프의 기록이 있던 초안이면 그 초안은
+ * 아카이브에 그대로 두고 새 초안으로 간다. 서버가 남긴 기록(r.archive)은 이 초안을 이어서 고친다.
+ */
+function showImported(r, forkId = null) {
+  if (forkId) forkDraft(forkId);
   state.draft.inputs.briefName = ''; // 예전 초안에 남은 이름이 원래 제목을 가리지 않게
   resetRevise();
   commitDoc(r.doc);
+  if (r.archive?.id) {
+    const src = state.draft.importSource;
+    state.draft.generation = {
+      id: r.archive.id, at: r.archive.at, kind: 'import', importSource: clone(src), inputs: clone(state.draft.inputs), sourceIds: [...state.draft.sourceIds],
+    };
+  }
   if (r.docEn) {
     state.draft.docEn = r.docEn;
     state.draft.docEnFrom = docStamp(currentDoc());
@@ -1080,8 +1095,14 @@ async function runImport() {
   const tick = setInterval(() => { $('progress_eta').textContent = fmtElapsed(Date.now() - started); }, 1000);
   let shown = false;
   const applied = new Set();
+  // 기록(생성·불러오기)이 있던 초안이면 불러온 브리프는 새 초안으로 — 앞의 것은 아카이브에서 그대로 열린다.
+  // 서버는 글이 나오는 순간 이 초안으로 아카이브 기록을 남긴다.
+  const forkId = state.draft.generation ? uid() + uid() : null;
   try {
-    const { jobId } = await api('POST', '/api/import', src.kind === 'notion' ? { url: src.url } : { sourceId: src.sourceId });
+    const { jobId } = await api('POST', '/api/import', {
+      ...(src.kind === 'notion' ? { url: src.url } : { sourceId: src.sourceId }),
+      draftId: forkId ?? state.draft.id,
+    });
     state.generateJob = jobId;
     state.importJob = jobId;
     const job = await pollJob(jobId, (j) => {
@@ -1091,7 +1112,8 @@ async function runImport() {
         // 글이 먼저 왔다 — 사진을 받는 동안에도 고칠 수 있게 풀어 준다.
         state.generateJob = null;
         setBusy(false);
-        showImported(j.data);
+        showImported(j.data, forkId);
+        refreshArchive();
         btn.textContent = '불러오기';
         $('progress_title').textContent = '미리보기를 띄웠습니다 — 사진을 마저 가져오는 중';
         setStatus('form_status', '사진은 받는 대로 채워집니다. 그동안 고쳐도 됩니다.', 'busy');
@@ -1100,8 +1122,9 @@ async function runImport() {
     });
     if (job.status === 'done') {
       const r = job.result;
-      if (!shown) { shown = true; showImported(r); }
+      if (!shown) { shown = true; showImported(r, forkId); }
       applyAssets(r.assets, applied);
+      refreshArchive();
       state.draft.warnings = r.warnings ?? [];
       state.draft.infos = r.infos ?? [];
       renderPreview();
@@ -1752,7 +1775,7 @@ function renderArchive() {
   if (!items.length) {
     const empty = document.createElement('div');
     empty.className = 'history-empty';
-    empty.textContent = '아직 생성한 기획서가 없습니다. [생성]이 끝날 때마다 그때의 입력과 결과가 여기에 쌓입니다.';
+    empty.textContent = '아직 기록이 없습니다. [생성]이 끝날 때, [기존 브리프 업로드]에서 불러올 때마다 여기에 쌓입니다.';
     list.replaceChildren(empty);
     return;
   }
@@ -1779,8 +1802,34 @@ function renderArchive() {
     head.append(title, del);
     const meta = document.createElement('div');
     meta.className = 'history-item-meta';
-    meta.textContent = [fmtWhen(it.at), it.brand, it.product, it.id === current ? '지금 보는 중' : ''].filter(Boolean).join(' · ');
+    const imported = it.kind === 'import';
+    meta.textContent = [fmtWhen(it.at), imported ? '기존 브리프' : '', it.brand, it.product, it.id === current ? '지금 보는 중' : ''].filter(Boolean).join(' · ');
     row.append(head, meta);
+    // 불러온 브리프: 넣었던 노션 링크(또는 PDF 이름)와, 고쳤으면 마지막 수정 시각 — 열면 그 마지막 수정본이 열린다.
+    const edited = Number(it.editedAt) > Number(it.at) + 60_000 ? `마지막 수정 ${fmtWhen(it.editedAt)}` : '';
+    if (imported && (it.link || it.fileName)) {
+      const src = document.createElement('div');
+      src.className = 'history-item-meta history-item-source';
+      if (it.link) {
+        const a = document.createElement('a');
+        a.href = it.link;
+        a.target = '_blank';
+        a.rel = 'noopener';
+        a.textContent = '노션 원본';
+        a.title = it.link;
+        a.addEventListener('click', (e) => e.stopPropagation());
+        src.append(a);
+      } else {
+        src.append(`PDF ${it.fileName}`);
+      }
+      if (edited) src.append(` · ${edited}`);
+      row.append(src);
+    } else if (edited) {
+      const ed = document.createElement('div');
+      ed.className = 'history-item-meta';
+      ed.textContent = edited;
+      row.append(ed);
+    }
     row.addEventListener('click', () => openArchive(it.id));
     row.addEventListener('keydown', (e) => { if (e.key === 'Enter') openArchive(it.id); });
     return row;
@@ -1795,17 +1844,24 @@ async function refreshArchive() {
   renderArchive();
 }
 
+/** 기록이 불러온 브리프면 [기존 브리프 업로드] 탭에 넣었던 링크(또는 PDF)를 되살린다. */
+const importSourceOf = (entry) => (entry.kind === 'import' && entry.importSource ? clone(entry.importSource) : null);
+
 /** 아카이브 기록 → 그 기록을 이어서 고칠 새 초안. */
 function draftFromEntry(entry, id) {
   const sourceIds = (entry.sources ?? []).map((s) => s.id);
   const base = newDraft();
+  const importSource = importSourceOf(entry);
+  // 불러온 브리프의 PDF 는 사측 공유 파일 칸이 아니라 [기존 브리프 업로드] 칸에 들어간다.
+  const formSourceIds = importSource ? [] : sourceIds;
   return {
     ...base,
     id,
     createdAt: entry.at,
-    mode: 'new',
+    mode: importSource ? 'import' : 'new',
     inputs: { ...base.inputs, ...entry.inputs },
-    sourceIds,
+    sourceIds: formSourceIds,
+    importSource,
     doc: entry.doc,
     docEn: entry.docEn ?? null,
     docEnFrom: '',
@@ -1813,7 +1869,9 @@ function draftFromEntry(entry, id) {
     sourceNotes: entry.sourceNotes ?? '',
     warnings: entry.warnings ?? [],
     infos: entry.infos ?? [],
-    generation: { id: entry.id, at: entry.at, inputs: { ...entry.inputs }, sourceIds },
+    generation: {
+      id: entry.id, at: entry.at, inputs: { ...entry.inputs }, sourceIds: formSourceIds, ...(importSource ? { kind: 'import', importSource } : {}),
+    },
   };
 }
 
@@ -1838,6 +1896,10 @@ async function openArchive(id, { note = '아카이브에서 열었습니다' } =
       draft = draftFromEntry(entry, reuse ? entry.draftId : uid() + uid());
       if (!reuse) await api('PUT', `/api/archive/${id}`, { draftId: draft.id });
       fresh = true;
+    } else if (entry.kind === 'import') {
+      // 불러온 브리프를 이어서 고치던 초안 — 미리보기는 마지막 수정본 그대로, 탭은 [기존 브리프 업로드]에 넣었던 링크로.
+      draft.mode = 'import';
+      draft.importSource = importSourceOf(entry) ?? draft.importSource ?? null;
     } else {
       // 이어서 고치던 초안이라도 폼은 그 생성 때 입력으로 — 다음 생성을 준비하며 고친 폼이 남아 있을 수 있다
       // (만드는 동안 창을 닫으면 앞 초안에 새 입력이 저장된 채로 남는다). 미리보기는 고친 것 그대로.

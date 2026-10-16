@@ -7,6 +7,7 @@ import { extractJsonObject } from '../claude/json.js';
 import { IMPORT_PDF, fixEscapes, validate } from './schema.js';
 import { importPdfSystem, importPdfUser } from './prompts.js';
 import { decodePdfImage, pdfImageTable } from '../sources/pdf-images.js';
+import { MAX_IMAGE_BYTES } from '../sources/notion-blocks.js';
 
 /**
  * 노션에서 PDF 로 내보낸 기존 브리프 → 간단한 블록 나무(src/sources/notion-blocks.js 와 같은 모양).
@@ -197,6 +198,7 @@ function scanContent(src, onDo, ctm0) {
 
 /**
  * 쪽마다 그려지는 사진을 읽는 순서(쪽 → 위에서 아래 → 왼쪽에서 오른쪽)로. 이모지·아이콘처럼 작은 것은 뺀다.
+ * 같은 사진이 여러 자리에 그려지면 자리마다 하나씩(obj 는 같다).
  * @returns {{ n:number, obj:string, page:number, width:number, height:number, shape:string, pos:number }[]}
  */
 export function pdfImageList(buf, { max = 60, table = pdfImageTable(buf) } = {}) {
@@ -216,7 +218,7 @@ export function pdfImageList(buf, { max = 60, table = pdfImageTable(buf) } = {})
         const num = map.get(name);
         if (!num) return;
         if (table.objs.has(num)) {
-          if (table.masks.has(num) || seen.has(num)) return;
+          if (table.masks.has(num)) return;
           const o = table.objs.get(num);
           const width = Number(o.head.match(/\/Width\s+(\d+)/)?.[1] ?? 0);
           const height = Number(o.head.match(/\/Height\s+(\d+)/)?.[1] ?? 0);
@@ -225,7 +227,11 @@ export function pdfImageList(buf, { max = 60, table = pdfImageTable(buf) } = {})
           const dw = Math.max(...xs) - Math.min(...xs);
           const dh = Math.max(...ys) - Math.min(...ys);
           if (Math.min(width, height) < 100 || Math.min(dw, dh) < 30) return; // 이모지·아이콘
-          seen.add(num);
+          // 같은 사진을 두 자리에 쓰면 PDF 는 사진 하나를 두 번 그린다 — 자리마다 따로 센다. 하나로 세면 목록이
+          // 그림 수보다 짧아져 Claude 가 다음 사진 번호를 앞당겨 쓴다(다음 GIF 가 위로 오고 그 자리 GIF 는 빠진다).
+          const at = `${num}@${pi}:${Math.round(Math.max(...ys))}:${Math.round(Math.min(...xs))}`;
+          if (seen.has(at)) return;
+          seen.add(at);
           found.push({ obj: num, pageIndex: pi, top: Math.max(...ys), left: Math.min(...xs), width, height, pageH });
           return;
         }
@@ -371,10 +377,68 @@ export function markdownToBlocks(md) {
   return root;
 }
 
+// ── 사진 번호 바로잡기 ──────────────────────────────────────────────────────
+
+/**
+ * Claude 가 같은 사진 번호를 두 자리에 적었으면 바로잡는다. 사진 목록은 자리마다 하나라 번호가 겹치면 늘 잘못이다 —
+ * 그대로 두면 한 사진이 두 번 나오고 그 자리에 있어야 할 사진은 빠진다.
+ * 사진 목록은 읽는 순서라 글 속 번호도 대개 커지는 순서다. 겹친 번호마다 「어느 자리를 남겨야 나머지 자리에
+ * 앞뒤 번호 사이의 안 쓴 번호가 들어가는가」를 견줘 가장 많이 채우는 쪽을 고른다. 맞는 번호가 없는 자리는
+ * 빈 번호(0)로 둔다 — 엉뚱한 사진 대신 회색 자리가 되어 사람이 넣는다.
+ * @returns {number} 바꾼 자리 수
+ */
+export function repairImageNumbers(blocks, total) {
+  const refs = [];
+  const walk = (list) => {
+    for (const b of list ?? []) {
+      if (b.t === 'image' && b.src?.kind === 'pdf') refs.push(b);
+      walk(b.children);
+      for (const col of b.columns ?? []) walk(col);
+    }
+  };
+  walk(blocks);
+  const nums = refs.map((r) => Number(r.src.n));
+  const groups = new Map();
+  nums.forEach((n, i) => groups.set(n, [...(groups.get(n) ?? []), i]));
+  const dups = [...groups.entries()].filter(([, at]) => at.length > 1);
+  if (!dups.length) return 0;
+
+  const all = Array.from({ length: total }, (_, i) => i + 1);
+  const free = new Set(all.filter((n) => !groups.has(n)));
+  let changed = 0;
+  for (const [, at] of dups) {
+    let best = null;
+    for (const keep of at) {
+      const trial = [...nums];
+      const left = new Set(free);
+      for (const o of at) if (o !== keep) trial[o] = 0; // 다른 자리는 비우고 다시 고른다
+      let filled = 0;
+      for (const o of at) {
+        if (o === keep) continue;
+        const prev = trial.slice(0, o).reverse().find((n) => n > 0) ?? 0;
+        const next = trial.slice(o + 1).find((n) => n > 0) ?? total + 1;
+        const pick = [...left].sort((a, b) => a - b).find((n) => n > prev && n < next);
+        if (pick) { trial[o] = pick; left.delete(pick); filled += 1; }
+      }
+      if (!best || filled > best.filled) best = { trial, left, filled };
+    }
+    for (const o of at) {
+      if (best.trial[o] !== nums[o]) {
+        refs[o].src = { kind: 'pdf', n: best.trial[o] };
+        nums[o] = best.trial[o];
+        changed += 1;
+      }
+    }
+    free.clear();
+    for (const n of best.left) free.add(n);
+  }
+  return changed;
+}
+
 // ── 한 바퀴 ─────────────────────────────────────────────────────────────────
 
 /**
- * @returns {Promise<{ title:string, blocks:object[], imageGetter:()=>Promise<(src:object)=>Promise<object>>, infos:string[] }>}
+ * @returns {Promise<{ title:string, blocks:object[], imageGetter:()=>Promise<(src:object)=>Promise<object>>, infos:string[], warnings:string[] }>}
  */
 export async function transcribePdf({ file, jobDir, signal, onProgress = () => {}, run = runClaude }) {
   const buf = fs.readFileSync(file);
@@ -420,13 +484,18 @@ export async function transcribePdf({ file, jobDir, signal, onProgress = () => {
     if (!im) throw new Error('PDF 에서 그 사진을 찾지 못했습니다');
     const got = decodePdfImage(table, im.obj);
     if (!got) throw new Error('PDF 의 사진 형식을 꺼내지 못했습니다');
-    if (got.data.length > 20 * 1024 * 1024) throw new Error('20MB 를 넘습니다');
+    if (got.data.length > MAX_IMAGE_BYTES) throw new Error(`${MAX_IMAGE_BYTES / 1024 / 1024}MB 를 넘습니다`);
     return { ...got, name: `pdf-image-${im.n}${got.mime === 'image/jpeg' ? '.jpg' : '.png'}` };
   };
+  const blocks = markdownToBlocks(value.markdown);
+  const warnings = [];
+  const fixed = repairImageNumbers(blocks, images.length);
+  if (fixed) warnings.push(`사진 번호가 겹친 ${fixed}곳을 PDF 순서대로 바로잡았습니다 — 사진이 제자리인지 한 번 봐 주세요`);
   return {
     title: String(value.title ?? '').trim(),
-    blocks: markdownToBlocks(value.markdown),
+    blocks,
     infos,
+    warnings,
     imageGetter: async () => getImage,
   };
 }
