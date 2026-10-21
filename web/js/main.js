@@ -1413,7 +1413,7 @@ function paintClaude() {
   } else if (c.loggedIn) {
     dot.className = 'dot ok';
     t.textContent = `Claude · ${String(c.email ?? '').split('@')[0] || '로그인됨'}`;
-    btn.title = `${c.email} (${c.plan || c.method}) — 눌러서 다시 확인`;
+    btn.title = `${c.email} (${c.plan || c.method}) — 눌러서 로그아웃·다른 계정으로 로그인`;
   } else if (c.loggedIn === false) {
     dot.className = 'dot bad';
     t.textContent = 'Claude 로그인';
@@ -1518,12 +1518,15 @@ async function claudeClick() {
     toast('Claude Code 를 먼저 설치해 주세요 — 설치 스크립트를 다시 실행하면 함께 설치됩니다', true);
     return;
   }
-  if (state.claude.loggedIn) {
-    await api('POST', '/api/claude/refresh');
-    await refreshState();
-    toast(state.claude.loggedIn ? `로그인되어 있습니다 (${state.claude.email})` : '로그인이 풀렸습니다');
-    return;
-  }
+  if (state.claude.loggedIn) return openClaudeDialog();
+  return claudeLogin();
+}
+
+/**
+ * 로그인 창을 띄우고 로그인될 때까지 기다린다.
+ * @param {string} [from] 방금 로그아웃한 계정 — 같은 계정으로 다시 들어왔으면(브라우저의 claude.ai 가 그 계정) 알린다
+ */
+async function claudeLogin(from = '') {
   const r = await api('POST', '/api/claude/login');
   if (!r.ok) return toast(r.error, true);
   toast('로그인 창이 열렸습니다 — 브라우저에서 마치면 여기가 자동으로 바뀝니다');
@@ -1531,7 +1534,61 @@ async function claudeClick() {
     await sleep(3000);
     await api('POST', '/api/claude/refresh').catch(() => {});
     await refreshState();
-    if (state.claude.loggedIn) { toast('Claude 에 로그인했습니다'); return; }
+    if (state.claude.loggedIn) {
+      if (from && state.claude.email === from) {
+        toast(`같은 계정(${from})으로 다시 로그인됐습니다 — 다른 계정을 쓰려면 브라우저의 claude.ai 에서 로그아웃하고 그 계정으로 로그인한 뒤 다시 해 주세요`, true);
+      } else {
+        toast(`Claude 에 로그인했습니다 (${state.claude.email})`);
+      }
+      return;
+    }
+  }
+}
+
+function paintClaudeDialog() {
+  const c = state.claude;
+  $('claude_kv').replaceChildren(
+    ...kvRow('계정', c.loggedIn ? c.email || '-' : '로그인 안 됨'),
+    ...kvRow('플랜', c.plan || c.method || '-'),
+  );
+}
+
+/** 지금 계정을 보여 주고 로그아웃·다른 계정으로 로그인을 고르게 한다. 연 뒤에 실제 상태로 한 번 더 맞춘다. */
+async function openClaudeDialog() {
+  paintClaudeDialog();
+  setStatus('claude_status', '');
+  openDialog('claude_dialog');
+  await api('POST', '/api/claude/refresh').catch(() => {});
+  await refreshState();
+  paintClaudeDialog();
+  if (!state.claude.loggedIn) setStatus('claude_status', '로그인이 풀렸습니다 — [다른 계정으로 로그인]으로 다시 로그인해 주세요', 'warn');
+}
+
+/**
+ * 로그아웃 — then = 'login' 이면 이어서 로그인 창을 띄운다(다른 계정으로 바꾸기).
+ * 생성·편집처럼 Claude 를 쓰는 작업이 도는 중이면 서버가 거절한다(409).
+ */
+async function claudeLogout(then = '') {
+  const from = state.claude.email ?? '';
+  const btns = [$('claude_logout'), $('claude_switch')];
+  const btn = then === 'login' ? $('claude_switch') : $('claude_logout');
+  for (const b of btns) b.disabled = true;
+  btn.classList.add('is-loading');
+  setStatus('claude_status', '로그아웃하는 중…', 'busy');
+  try {
+    if (state.claude.loggedIn) {
+      const r = await api('POST', '/api/claude/logout');
+      if (!r.ok) throw new Error(r.error || '로그아웃하지 못했습니다');
+    }
+    await refreshState();
+    $('claude_dialog').close();
+    if (then === 'login') await claudeLogin(from);
+    else toast('Claude 에서 로그아웃했습니다 — 생성하려면 오른쪽 위 [Claude 로그인]으로 다시 로그인해 주세요');
+  } catch (e) {
+    setStatus('claude_status', e.message, 'bad');
+  } finally {
+    for (const b of btns) b.disabled = false;
+    btn.classList.remove('is-loading');
   }
 }
 
@@ -2291,6 +2348,8 @@ function wire() {
   $('publish_btn').addEventListener('click', openPublish);
   $('publish_go').addEventListener('click', doPublish);
   $('claude_btn').addEventListener('click', () => claudeClick().catch((e) => toast(e.message, true)));
+  $('claude_logout').addEventListener('click', () => claudeLogout());
+  $('claude_switch').addEventListener('click', () => claudeLogout('login'));
   $('notion_btn').addEventListener('click', notionClick);
   $('kg_btn').addEventListener('click', kgClick);
   $('kg_save').addEventListener('click', () => {
@@ -2370,8 +2429,21 @@ function wire() {
   });
 }
 
+/**
+ * 입력 칸이 시작하는 높이(머리줄 아래)를 CSS 의 --form-top 으로 — 입력 칸 높이에서 이만큼 빼야
+ * 끝까지 내렸을 때 [생성] 버튼이 화면 안에 들어온다(app.css .col-form).
+ */
+function fitFormColumn() {
+  const top = document.querySelector('.layout').getBoundingClientRect().top + window.scrollY;
+  document.documentElement.style.setProperty('--form-top', `${Math.round(top)}px`);
+}
+
 (async function boot() {
   try {
+    fitFormColumn();
+    window.addEventListener('resize', fitFormColumn);
+    // 머리줄이 접히거나(좁은 창) 테스트 배지가 붙으면 높이가 바뀐다
+    new ResizeObserver(fitFormColumn).observe(document.querySelector('header'));
     const session = await initSession();
     wire();
     await refreshState();

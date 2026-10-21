@@ -282,13 +282,35 @@
     <div class="fx-overlay-body">
       <p class="fx-help">캠페인 목록과, 고른 캠페인의 <b>Account ID</b>·<b>업로드폼 링크</b>를 kglowing 외부 API 에서 가져옵니다. 관리자에게 받은 <b>X-API-KEY</b> 를 붙여넣고 저장하세요. 저장하기 전에 맞는 키인지 확인하고, 이 PC 에만 저장합니다.</p>
       <dl class="kv" id="kg_kv"></dl>
-      <input type="password" id="kg_key" autocomplete="off" spellcheck="false" placeholder="X-API-KEY 붙여넣기">
+      <!-- type="password" 를 쓰지 않는다 — 비밀번호 칸이 있으면 크롬이 이 화면을 로그인 화면으로 보고, 저장된 아이디를
+           그 앞의 보이는 칸(사측 공유 파일 링크 칸)에 채운다(케비서 서버판은 같은 사이트라 케비서 로그인 아이디가 들어갔다).
+           가리기는 CSS(.fx-secret)로 한다. -->
+      <input type="text" id="kg_key" class="fx-secret" autocomplete="off" spellcheck="false" placeholder="X-API-KEY 붙여넣기">
       <p class="fx-status" id="kg_status"></p>
     </div>
     <div class="fx-overlay-foot">
       <div class="fx-overlay-actions">
         <button type="button" class="secondary-btn" id="kg_clear">키 지우기</button>
         <button type="button" class="primary-btn" id="kg_save"><span class="btn-text">확인하고 저장</span><span class="loader"></span></button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Claude 계정 — 로그인돼 있을 때 [Claude · 아이디] 를 누르면. 로그아웃하거나 로그아웃 뒤 다른 계정으로 다시 로그인한다 -->
+  <dialog class="fx-overlay fx-modal" id="claude_dialog">
+    <div class="fx-overlay-head">Claude 계정 <span class="fx-spacer"></span>
+      <button type="button" class="fx-overlay-close" data-close aria-label="닫기"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    </div>
+    <div class="fx-overlay-body">
+      <dl class="kv" id="claude_kv"></dl>
+      <p class="fx-help"><b>[다른 계정으로 로그인]</b>을 누르면 지금 계정에서 로그아웃한 뒤 로그인 창이 열립니다. 로그인은 브라우저에 로그인된 claude.ai 계정으로 이어지니 <b>승인 화면에 나온 계정을 꼭 확인</b>하세요 — 다른 계정이 나오면 그 브라우저의 claude.ai 에서 로그아웃하고 원하는 계정으로 로그인한 뒤 승인하면 됩니다.</p>
+      <p class="fx-help">이 PC 의 Claude Code 로그인 자체가 바뀝니다 — 이 PC 에서 따로 쓰는 Claude Code 도 같은 계정을 쓰게 됩니다.</p>
+      <p class="fx-status" id="claude_status"></p>
+    </div>
+    <div class="fx-overlay-foot">
+      <div class="fx-overlay-actions">
+        <button type="button" class="secondary-btn" id="claude_logout"><span class="btn-text">로그아웃</span><span class="loader"></span></button>
+        <button type="button" class="primary-btn" id="claude_switch"><span class="btn-text">다른 계정으로 로그인</span><span class="loader"></span></button>
       </div>
     </div>
   </dialog>

@@ -90,10 +90,13 @@ header .fx-head-actions { margin-left: auto; align-self: center; display: flex; 
   gap: 14px;
   align-items: start;
 }
+/* 입력 칸은 머리줄 아래(--form-top, main.js fitFormColumn 이 잰다)에서 시작한다 — 그만큼 빼야 끝까지 내렸을 때
+   [생성] 버튼이 화면 안에 들어온다. 안 빼면 아래 30px 가 화면 밖에 남는데, 안쪽 스크롤이 페이지로 안 넘어가서
+   (overscroll contain) 케비서 iframe 처럼 페이지를 따로 내릴 일이 없는 화면에선 버튼이 끝내 안 보였다. */
 .col-form {
   position: sticky;
   top: 10px;
-  max-height: calc(100vh - 20px);
+  max-height: calc(100vh - var(--form-top, 50px) - 10px);
   overflow-y: auto;
   overscroll-behavior: contain;
   padding-bottom: 4px;
@@ -152,6 +155,8 @@ input:focus, textarea:focus, select:focus {
   background: #fff;
 }
 input::placeholder, textarea::placeholder { color: var(--fx-text-weaker); }
+/* 키처럼 가릴 칸 — type="password" 대신(크롬이 로그인 화면으로 보고 아이디를 엉뚱한 칸에 채운다) */
+input.fx-secret { -webkit-text-security: disc; }
 input.is-invalid, textarea.is-invalid { border-color: var(--fx-error); }
 
 /* Account ID — 맨 앞 @ 고정. 칸처럼 보이는 바깥 틀 안에 @ 와 안쪽 입력이 산다. */

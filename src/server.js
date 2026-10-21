@@ -10,7 +10,9 @@ import { readNotionViaApi, listChildPagesViaApi } from './sources/notion-api.js'
 import { listPublicChildPages } from './sources/notion-public.js';
 import * as store from './store.js';
 import * as archive from './archive.js';
-import { startJob, getJob, jobView, cancelJob } from './jobs.js';
+import {
+  startJob, getJob, jobView, cancelJob, runningCount,
+} from './jobs.js';
 import { generateBrief, findPartnershipPage } from './brief/generate.js';
 import { referenceKeywords } from './brief/reference.js';
 import * as videos from './video/store.js';
@@ -308,7 +310,11 @@ async function handleApi(req, res, url) {
   if (req.headers['x-cbs-token'] !== SESSION_TOKEN) return json(res, 403, { error: '세션이 바뀌었습니다. 화면을 새로고침해 주세요.' });
 
   if (m === 'POST' && p === '/api/claude/login') return json(res, 200, authLogin());
-  if (m === 'POST' && p === '/api/claude/logout') return json(res, 200, await authLogout());
+  if (m === 'POST' && p === '/api/claude/logout') {
+    // 도는 작업(생성·편집·GIF·게시 등)이 쓰는 로그인을 중간에 빼지 않는다
+    if (runningCount() > 0) return json(res, 409, { ok: false, error: '생성·편집 같은 작업이 도는 중이라 로그아웃하지 않았습니다 — 끝난 뒤에 다시 눌러 주세요.' });
+    return json(res, 200, await authLogout());
+  }
   if (m === 'POST' && p === '/api/claude/refresh') return json(res, 200, { claude: { ...(await refreshAuth()) } });
 
   if (m === 'POST' && p === '/api/team-code') {
