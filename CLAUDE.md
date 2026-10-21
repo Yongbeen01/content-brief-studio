@@ -195,6 +195,12 @@ OAuth 연결 자체를 확인할 때만 설치본을 멈추고 4325 로 띄운�
     한국어로 바꾼 뒤 버튼은 [영어로 생성]이 되고, 받아 둔 언어로는 기다림 없이 돌아간다. [새로 고침]은 지금 언어로 다시.
     언어를 바꾸면 `refTarget` 을 새 객체로 바꿔 끼워 늦게 온 다른 언어 답을 버린다. 하니스 `pw-verify/cbs-ref-grid-check.mjs`(실제 Claude 21항목).
 - `src/claude/` — Claude CLI 호출(구독 로그인, stream-json, --json-schema), JSON 추출.
+  - **조직이 Claude Code 를 막아 둔 경우**(「Your organization has disabled Claude subscription access for Claude Code」, 코드
+    `oauth_org_not_allowed`): 로그인 토큰이 속한 **조직**의 Anthropic 서버 설정이라 같은 계정·조직으로 다시 로그인해도 똑같다.
+    auth status 는 멀쩡히 「로그인됨」 이라 `kind: 'org_blocked'` 로 따로 잡아 막힌 조직을 기억하고(앱을 다시 켜면 잊음, 성공하면 걷음)
+    머리줄을 「Claude 사용 막힘」 으로. 같은 이메일이 여러 조직에 들 수 있어 **이메일 말고 orgId 로** 비교한다.
+    로그인 직후엔 haiku 한 번으로 실제 호출이 되는지 본다(`checkAccess`, `/api/claude/check`). 옛 CLI 문구(「OAuth authentication is
+    currently not allowed…」)는 LOGIN_HINT 의 authenticat 에도 걸리므로 막힘을 먼저 본다. 하니스 `pw-verify/run-org-blocked.sh`(21, 가짜 claude).
 - `src/sources/` — 사측 공유 파일 읽기(docx·pptx·xlsx 는 의존성 없는 ZIP/XML 파서, PDF 는 Claude 가 직접 읽음, 노션 링크).
   사진도 같이 꺼낸다: `images.js`(추려내기)·`pdf-images.js`(PDF 안의 사진 객체 → JPEG 그대로 / PNG 로 다시 포장,
   투명도 `/SMask` 를 같이 넣지 않으면 오려낸 제품 컷 배경이 검게 나온다)·`imagemeta.js`(크기).

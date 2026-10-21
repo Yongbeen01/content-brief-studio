@@ -1411,9 +1411,13 @@ function paintClaude() {
     dot.className = 'dot bad';
     t.textContent = 'Claude Code 설치 필요';
   } else if (c.loggedIn) {
-    dot.className = 'dot ok';
-    t.textContent = `Claude · ${String(c.email ?? '').split('@')[0] || '로그인됨'}`;
-    btn.title = `${c.email} (${c.plan || c.method}) — 눌러서 로그아웃·다른 계정으로 로그인`;
+    // blocked = 이 조직으로 부른 Claude 가 「조직이 Claude Code 를 막아 둠」 으로 거절됐다(로그인 자체는 멀쩡하다)
+    const id = String(c.email ?? '').split('@')[0] || '로그인됨';
+    dot.className = c.blocked ? 'dot bad' : 'dot ok';
+    t.textContent = c.blocked ? `Claude 사용 막힘 · ${id}` : `Claude · ${id}`;
+    btn.title = c.blocked
+      ? `${claudeWho(c)} — 이 조직은 Claude Code 사용이 막혀 있습니다. 눌러서 다른 계정으로 로그인`
+      : `${claudeWho(c)} (${c.plan || c.method}) — 눌러서 로그아웃·다른 계정으로 로그인`;
   } else if (c.loggedIn === false) {
     dot.className = 'dot bad';
     t.textContent = 'Claude 로그인';
@@ -1522,11 +1526,19 @@ async function claudeClick() {
   return claudeLogin();
 }
 
+/** 계정을 가리키는 말 — 같은 이메일이 여러 조직에 들 수 있어 조직 이름도 붙인다 */
+const claudeWho = (c) => [c.email, c.orgName && `조직 ${c.orgName}`].filter(Boolean).join(' · ');
+
+const ORG_BLOCKED_HELP = '이 조직은 Claude Code 사용이 막혀 있습니다 — 같은 계정·조직으로는 다시 로그인해도 똑같습니다. '
+  + '[다른 계정으로 로그인]에서 Claude Code 를 쓸 수 있는 계정·조직으로 승인해 주세요.';
+
 /**
- * 로그인 창을 띄우고 로그인될 때까지 기다린다.
- * @param {string} [from] 방금 로그아웃한 계정 — 같은 계정으로 다시 들어왔으면(브라우저의 claude.ai 가 그 계정) 알린다
+ * 로그인 창을 띄우고 로그인될 때까지 기다린 뒤, 그 계정·조직으로 실제 호출이 되는지 한 번 본다 —
+ * 조직이 Claude Code 를 막아 두면 로그인은 멀쩡해도 생성이 거절된다.
+ * @param {{email: string, orgId: string}|null} [from] 방금 로그아웃한 계정 — 같은 계정·조직으로 다시 들어왔으면
+ *   (브라우저의 claude.ai 가 그 계정) 알린다. 이메일이 같아도 조직이 다르면 다른 로그인이다.
  */
-async function claudeLogin(from = '') {
+async function claudeLogin(from = null) {
   const r = await api('POST', '/api/claude/login');
   if (!r.ok) return toast(r.error, true);
   toast('로그인 창이 열렸습니다 — 브라우저에서 마치면 여기가 자동으로 바뀝니다');
@@ -1534,14 +1546,22 @@ async function claudeLogin(from = '') {
     await sleep(3000);
     await api('POST', '/api/claude/refresh').catch(() => {});
     await refreshState();
-    if (state.claude.loggedIn) {
-      if (from && state.claude.email === from) {
-        toast(`같은 계정(${from})으로 다시 로그인됐습니다 — 다른 계정을 쓰려면 브라우저의 claude.ai 에서 로그아웃하고 그 계정으로 로그인한 뒤 다시 해 주세요`, true);
-      } else {
-        toast(`Claude 에 로그인했습니다 (${state.claude.email})`);
-      }
+    if (!state.claude.loggedIn) continue;
+    const c = state.claude;
+    const same = from && (from.orgId && c.orgId ? from.orgId === c.orgId : from.email === c.email);
+    if (same) {
+      toast(c.blocked
+        ? `같은 계정·조직(${claudeWho(c)})으로 다시 로그인됐습니다 — 이 조직은 Claude Code 사용이 막혀 있어 그대로는 또 실패합니다. 브라우저의 claude.ai 에서 Claude Code 를 쓸 수 있는 계정으로 바꾼 뒤 다시 해 주세요`
+        : `같은 계정(${claudeWho(c)})으로 다시 로그인됐습니다 — 다른 계정을 쓰려면 브라우저의 claude.ai 에서 로그아웃하고 그 계정으로 로그인한 뒤 다시 해 주세요`, true);
       return;
     }
+    toast(`로그인했습니다 (${claudeWho(c)}) — Claude 를 쓸 수 있는지 확인하는 중…`);
+    const chk = await api('POST', '/api/claude/check').catch(() => null);
+    await refreshState();
+    if (chk?.access === 'blocked') toast(chk.message, true);
+    else if (chk?.access === 'ok') toast(`Claude 에 로그인했습니다 (${claudeWho(state.claude)}) — 쓸 수 있는 것까지 확인했습니다`);
+    else toast(`Claude 에 로그인했습니다 (${claudeWho(state.claude)})`);
+    return;
   }
 }
 
@@ -1549,6 +1569,7 @@ function paintClaudeDialog() {
   const c = state.claude;
   $('claude_kv').replaceChildren(
     ...kvRow('계정', c.loggedIn ? c.email || '-' : '로그인 안 됨'),
+    ...kvRow('조직', (c.loggedIn && c.orgName) || '-'),
     ...kvRow('플랜', c.plan || c.method || '-'),
   );
 }
@@ -1556,12 +1577,13 @@ function paintClaudeDialog() {
 /** 지금 계정을 보여 주고 로그아웃·다른 계정으로 로그인을 고르게 한다. 연 뒤에 실제 상태로 한 번 더 맞춘다. */
 async function openClaudeDialog() {
   paintClaudeDialog();
-  setStatus('claude_status', '');
+  setStatus('claude_status', state.claude.blocked ? ORG_BLOCKED_HELP : '', state.claude.blocked ? 'bad' : '');
   openDialog('claude_dialog');
   await api('POST', '/api/claude/refresh').catch(() => {});
   await refreshState();
   paintClaudeDialog();
   if (!state.claude.loggedIn) setStatus('claude_status', '로그인이 풀렸습니다 — [다른 계정으로 로그인]으로 다시 로그인해 주세요', 'warn');
+  else if (state.claude.blocked) setStatus('claude_status', ORG_BLOCKED_HELP, 'bad');
 }
 
 /**
@@ -1569,7 +1591,7 @@ async function openClaudeDialog() {
  * 생성·편집처럼 Claude 를 쓰는 작업이 도는 중이면 서버가 거절한다(409).
  */
 async function claudeLogout(then = '') {
-  const from = state.claude.email ?? '';
+  const from = { email: state.claude.email ?? '', orgId: state.claude.orgId ?? '' };
   const btns = [$('claude_logout'), $('claude_switch')];
   const btn = then === 'login' ? $('claude_switch') : $('claude_logout');
   for (const b of btns) b.disabled = true;
@@ -2350,6 +2372,7 @@ function wire() {
   $('claude_btn').addEventListener('click', () => claudeClick().catch((e) => toast(e.message, true)));
   $('claude_logout').addEventListener('click', () => claudeLogout());
   $('claude_switch').addEventListener('click', () => claudeLogout('login'));
+  window.addEventListener('cbs:claude-blocked', () => { refreshState(); });
   $('notion_btn').addEventListener('click', notionClick);
   $('kg_btn').addEventListener('click', kgClick);
   $('kg_save').addEventListener('click', () => {

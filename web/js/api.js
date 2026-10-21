@@ -48,7 +48,11 @@ export async function pollJob(jobId, onTick = () => {}, { intervalMs = 900 } = {
   for (;;) {
     const { job } = await api('GET', `/api/jobs/${jobId}`);
     onTick(job);
-    if (job.status !== 'running') return job;
+    if (job.status !== 'running') {
+      // 조직이 Claude Code 를 막아 뒀다 — 머리줄 [Claude] 를 30초 주기 갱신까지 기다리지 않고 바로 「사용 막힘」 으로
+      if (job.error?.kind === 'org_blocked') window.dispatchEvent(new CustomEvent('cbs:claude-blocked'));
+      return job;
+    }
     await sleep(intervalMs);
   }
 }

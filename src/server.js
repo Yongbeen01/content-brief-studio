@@ -4,7 +4,9 @@ import http from 'node:http';
 import { pipeline } from 'node:stream';
 import path from 'node:path';
 import { ROOT, config, notionRedirectUri, appVersion } from './config.js';
-import { authStatus, authLogin, authLogout, refreshAuth } from './claude/cli.js';
+import {
+  authStatus, authLogin, authLogout, refreshAuth, checkAccess,
+} from './claude/cli.js';
 import * as sources from './sources/index.js';
 import { readNotionViaApi, listChildPagesViaApi } from './sources/notion-api.js';
 import { listPublicChildPages } from './sources/notion-public.js';
@@ -316,6 +318,11 @@ async function handleApi(req, res, url) {
     return json(res, 200, await authLogout());
   }
   if (m === 'POST' && p === '/api/claude/refresh') return json(res, 200, { claude: { ...(await refreshAuth()) } });
+  // 로그인 직후 — 이 계정·조직으로 실제 호출이 되는지(조직이 Claude Code 를 막아 두면 로그인은 멀쩡해도 호출만 막힌다)
+  if (m === 'POST' && p === '/api/claude/check') {
+    const r = await checkAccess();
+    return json(res, 200, { ...r, claude: authStatus() });
+  }
 
   if (m === 'POST' && p === '/api/team-code') {
     const body = await readJson(req);

@@ -44,10 +44,11 @@ const DEFAULTS = {
    * 기존 브리프 PDF 옮겨 적기는 판단이 아니라 베끼기라 sonnet(빠르다).
    * 레퍼런스 검색어는 창을 띄워 놓고 기다리는 일이라 sonnet(몇 초).
    * 전체 수정은 문서 전체에서 지시가 짚는 자리를 찾아 고치고 나머지는 글자 그대로 둬야 해서 opus.
+   * 로그인 직후 「쓸 수 있는 조직인가」 확인은 답이 OK 한 마디라 haiku.
    * 별칭(opus/sonnet/haiku)은 CLI 가 그때그때 최신 모델로 푼다.
    */
   models: {
-    compose: 'opus', edit: 'sonnet', translate: 'opus', frames: 'sonnet', match: 'claude-opus-5', verify: 'sonnet', importPdf: 'sonnet', reference: 'sonnet', revise: 'opus',
+    compose: 'opus', edit: 'sonnet', translate: 'opus', frames: 'sonnet', match: 'claude-opus-5', verify: 'sonnet', importPdf: 'sonnet', reference: 'sonnet', revise: 'opus', check: 'haiku',
   },
   timeouts: {
     composeMs: 8 * 60_000, editMs: 3 * 60_000, framesMs: 8 * 60_000, matchMs: 4 * 60_000, verifyMs: 3 * 60_000, mediaMs: 10 * 60_000, referenceMs: 2 * 60_000, reviseMs: 6 * 60_000,

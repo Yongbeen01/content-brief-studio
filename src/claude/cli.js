@@ -1,7 +1,9 @@
 import { execFile, execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { DATA_DIR, HOME } from '../config.js';
+import {
+  DATA_DIR, DIRS, HOME, config,
+} from '../config.js';
 
 /**
  * Claude CLI 를 LLM 으로 쓴다. 인증은 각자 PC 의 구독 로그인(브라우저)이고 API 키는 쓰지 않는다.
@@ -104,13 +106,33 @@ export function killTree(child) {
 
 // ── 로그인 상태 ─────────────────────────────────────────────────────────────
 
-let auth = { loggedIn: null, email: '', plan: '', method: '', checkedAt: 0, error: '' };
+let auth = { loggedIn: null, email: '', plan: '', method: '', orgId: '', orgName: '', checkedAt: 0, error: '' };
 let authInFlight = null;
+
+/**
+ * Claude Code 를 막아 둔 조직. 「Your organization has disabled Claude subscription access for Claude Code」
+ * (코드 oauth_org_not_allowed)는 로그인 토큰이 속한 조직이 구독 로그인으로 Claude Code 를 못 쓰게 해 둔 것이다 —
+ * Anthropic 서버 쪽 조직 설정이라 같은 계정·조직으로 다시 로그인해도 똑같다. 그런데 auth status 는 그대로
+ * 「로그인됨」 이라 화면만 봐서는 모른다. 한 번 막힌 조직을 기억해 머리줄에 띄운다(앱을 다시 켜면 잊는다).
+ * 같은 이메일이 여러 조직에 들 수 있어 이메일이 아니라 조직으로 센다.
+ */
+const blockedOrgs = new Set();
+const orgKey = () => auth.orgId || auth.email || '';
+const ORG_BLOCK_HINT = /(disabled Claude subscription access|OAuth authentication is currently not allowed)/i;
+
+const authView = (found) => ({ ...auth, found, blocked: !!orgKey() && blockedOrgs.has(orgKey()) });
 
 /** 캐시된 값을 준다. 낡았으면 뒤에서 갱신만 건다 — CLI 호출이 1초쯤 걸려 매번 부르면 서버가 멈춘다. */
 export function authStatus({ maxAgeMs = 60_000 } = {}) {
   if (Date.now() - auth.checkedAt > maxAgeMs) refreshAuth();
-  return { ...auth, found: claudeFound() };
+  return authView(claudeFound());
+}
+
+function orgBlockedMessage() {
+  const who = [auth.email, auth.orgName && `조직 「${auth.orgName}」`].filter(Boolean).join(' · ');
+  return `지금 로그인된 Claude 계정${who ? `(${who})` : ''}은 조직 설정으로 Claude Code 사용이 막혀 있습니다. `
+    + 'Anthropic 쪽 설정이라 같은 계정·조직으로 다시 로그인해도 똑같습니다 — 오른쪽 위 [Claude · 아이디] → [다른 계정으로 로그인]에서 '
+    + 'Claude Code 를 쓸 수 있는 계정·조직으로 승인해 주세요.';
 }
 
 /** `claude auth status` 는 JSON 을 준다. 문장에서 낱말을 찾지 않는다. */
@@ -118,15 +140,15 @@ export function refreshAuth() {
   if (authInFlight) return authInFlight;
   authInFlight = new Promise((resolve) => {
     if (!claudeFound()) {
-      auth = { loggedIn: false, email: '', plan: '', method: '', checkedAt: Date.now(), error: 'not_installed' };
+      auth = { loggedIn: false, email: '', plan: '', method: '', orgId: '', orgName: '', checkedAt: Date.now(), error: 'not_installed' };
       authInFlight = null;
-      resolve({ ...auth, found: false });
+      resolve(authView(false));
       return;
     }
     const a = claudeArgv(['auth', 'status']);
     execFile(a.cmd, a.args, { windowsHide: true, timeout: 20_000, env: cliEnv() }, (err, stdout) => {
       authInFlight = null;
-      let next = { loggedIn: false, email: '', plan: '', method: '', checkedAt: Date.now(), error: '' };
+      let next = { loggedIn: false, email: '', plan: '', method: '', orgId: '', orgName: '', checkedAt: Date.now(), error: '' };
       try {
         const j = JSON.parse(String(stdout));
         next = {
@@ -134,6 +156,8 @@ export function refreshAuth() {
           email: j.email ?? '',
           plan: j.subscriptionType ?? '',
           method: j.authMethod ?? '',
+          orgId: j.orgId ?? '',
+          orgName: j.orgName ?? '',
           checkedAt: Date.now(),
           error: '',
         };
@@ -141,7 +165,7 @@ export function refreshAuth() {
         next.error = String(err?.message ?? 'auth status 를 읽지 못했습니다').slice(0, 160);
       }
       auth = next;
-      resolve({ ...auth, found: true });
+      resolve(authView(true));
     });
   });
   return authInFlight;
@@ -223,7 +247,7 @@ export function authLogout() {
 // ── 한 번 호출 ──────────────────────────────────────────────────────────────
 
 export class ClaudeError extends Error {
-  /** @param {'not_installed'|'not_logged_in'|'rate_limited'|'timeout'|'cancelled'|'failed'|'bad_output'} kind */
+  /** @param {'not_installed'|'not_logged_in'|'org_blocked'|'rate_limited'|'timeout'|'cancelled'|'failed'|'bad_output'} kind */
   constructor(kind, message, extra = {}) {
     super(message);
     this.kind = kind;
@@ -298,6 +322,7 @@ export function runClaude({
     let stderr = '';
     let result = null;
     let rateInfo = null;
+    let orgBlocked = false;
     let chars = 0;
     let settled = false;
 
@@ -343,6 +368,8 @@ export function runClaude({
           break;
         }
         case 'assistant':
+          // API 오류는 CLI 가 만든 assistant 메시지로 오고 error 칸에 종류가 붙는다
+          if (ev.error === 'oauth_org_not_allowed') orgBlocked = true;
           for (const block of ev.message?.content ?? []) {
             if (block.type === 'tool_use' && block.name !== 'StructuredOutput') {
               onEvent({ type: 'tool', name: block.name, input: block.input });
@@ -375,12 +402,21 @@ export function runClaude({
     child.on('error', (e) => {
       finish(reject, new ClaudeError(e.code === 'ENOENT' ? 'not_installed' : 'failed', `Claude 실행 실패 — ${e.message}`));
     });
+    // 로그인 안내보다 먼저 본다 — 옛 CLI 는 「OAuth authentication is currently not allowed…」 를 그대로 내서
+    // LOGIN_HINT(authenticat)에도 걸리는데, 다시 로그인하라고 하면 같은 조직으로 또 들어가 같은 오류가 난다.
+    const rejectOrgBlocked = () => {
+      if (orgKey()) blockedOrgs.add(orgKey());
+      finish(reject, new ClaudeError('org_blocked', orgBlockedMessage()));
+    };
+
     child.on('close', (code) => {
       if (buf.trim()) onLine(buf.trim());
       const durationMs = Date.now() - started;
       if (!result) {
         const tail = stderr.trim().slice(-400);
-        if (LOGIN_HINT.test(stderr)) {
+        if (orgBlocked || ORG_BLOCK_HINT.test(stderr)) {
+          rejectOrgBlocked();
+        } else if (LOGIN_HINT.test(stderr)) {
           finish(reject, new ClaudeError('not_logged_in', 'Claude 에 로그인되어 있지 않습니다. 오른쪽 위 [Claude 로그인]을 눌러 주세요.'));
         } else {
           finish(reject, new ClaudeError('failed', `Claude 가 답 없이 끝났습니다 (코드 ${code}). ${tail}`));
@@ -389,6 +425,10 @@ export function runClaude({
       }
       const text = String(result.result ?? '');
       if (result.is_error) {
+        if (orgBlocked || ORG_BLOCK_HINT.test(text)) {
+          rejectOrgBlocked();
+          return;
+        }
         if (LOGIN_HINT.test(text)) {
           finish(reject, new ClaudeError('not_logged_in', 'Claude 에 로그인되어 있지 않습니다. 오른쪽 위 [Claude 로그인]을 눌러 주세요.'));
           return;
@@ -402,6 +442,8 @@ export function runClaude({
         finish(reject, new ClaudeError('failed', `Claude 오류 — ${text.slice(0, 300) || result.subtype}`));
         return;
       }
+      // 관리자가 풀어 줬거나 다른 조직으로 바꿨다 — 됐으면 막힘 표시를 걷는다
+      blockedOrgs.delete(orgKey());
       finish(resolve, {
         structured: result.structured_output ?? null,
         text,
@@ -414,4 +456,26 @@ export function runClaude({
     child.stdin.on('error', () => { /* 프로세스가 먼저 끝나면 EPIPE — close 에서 처리 */ });
     child.stdin.end(prompt, 'utf8');
   });
+}
+
+/**
+ * 지금 로그인으로 Claude 를 실제로 쓸 수 있는지 아주 짧은 호출 한 번(haiku, 몇 초)으로 본다 — 로그인 직후에.
+ * 막힌 조직이어도 auth status 는 「로그인됨」 이라, 이걸 안 하면 생성을 눌러 봐야 안다.
+ * @returns {Promise<{access: 'ok'|'blocked'|'unknown', message?: string}>}
+ */
+export async function checkAccess() {
+  await refreshAuth();
+  if (!auth.loggedIn) return { access: 'unknown', message: 'Claude 에 로그인되어 있지 않습니다.' };
+  try {
+    await runClaude({
+      system: 'Reply with exactly: OK',
+      prompt: 'OK',
+      model: config.models.check,
+      workDir: path.join(DIRS.jobs, 'claude-check'),
+      timeoutMs: 60_000,
+    });
+    return { access: 'ok' };
+  } catch (e) {
+    return { access: e.kind === 'org_blocked' ? 'blocked' : 'unknown', message: e.message };
+  }
 }
