@@ -220,10 +220,13 @@ export function createCutEditor({
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => {
         if (destroyed || !j?.strip) return;
+        // 주소는 지금 페이지 기준 전체 주소로 바꿔 둔다 — CSS 변수(--strip)에 상대 주소를 넣으면 크롬은 그 변수를 쓰는
+        // css/app.css 기준으로 풀어 서버판(/content-brief-app/)에서 css/api/... 404 → 바가 회색으로 남았다.
+        const src = new URL(j.strip.src, document.baseURI).href;
         // 사진을 먼저 받아 둔 뒤 깐다 — 칸마다 같은 주소라 한 번만 받는다
         const img = new Image();
-        img.onload = () => { if (!destroyed) { strips.set(id, j.strip); render(); } };
-        img.src = j.strip.src;
+        img.onload = () => { if (!destroyed) { strips.set(id, { ...j.strip, src }); render(); } };
+        img.src = src;
       })
       .catch(() => {}); // 사진이 없어도 바는 쓸 수 있다
   }
