@@ -271,6 +271,16 @@ OAuth 연결 자체를 확인할 때만 설치본을 멈추고 4325 로 띄운�
   a[download] 로(이름은 자산 이름, 사진이면 [이미지 다운로드]). 하니스 `pw-verify/cbs-filled-slot-check.mjs`(16항목, Claude 없음).
   이 두 버튼은 **하늘색 네모로 덮지 않고 그 GIF 썸네일 위에** 흰 카드로 뜬다(2026-10-16 사용자 요청 — `filledPanel` 의 `data-over-image` →
   상자 `panel-over-image`, `app.css .vp-over`). 회색 자리·작업 중 패널은 예전처럼 하늘색 바탕.
+  **틱톡 영상으로 만든 GIF 는 원본 링크를 남긴다**(2026-10-28 사용자 요청): 그 GIF 를 누르면 [영상 소스 보기]가 하나 더 뜨고, 누르면
+  그 GIF 에 쓴 틱톡 영상마다 새 탭이 열린다. 링크는 `asset.sources`(문서의 그 자리에 저장 — 되돌리기·아카이브·게시는 그대로, 노션에는 안 올라감).
+  - 영상 기록의 `sourceUrl`: 틱톡 다운로더 1.5.0~ 가 올릴 때 `x-source-url` 로 준다(`server.js POST /api/videos`). 없으면 확장이 붙이는
+    파일 이름 「계정_영상번호.mp4」(「 (1)」 포함)에서 만든다(`video/store.js sourceUrlOf`) — 옛 확장·내려받아 직접 올린 영상도 된다.
+    다만 「.」 으로 시작하는 계정은 확장이 파일 이름에서 점을 빼므로 헤더가 있어야 맞는 주소가 된다. 틱톡 영상 주소 모양만 받는다.
+  - GIF 를 만들 때 조각에 쓴 영상 순서대로 겹치지 않게 모은다(`video/clip.js clipSources`). 틱톡 영상이 아니면 빠지고, 하나도 없으면 칸이 없다.
+  - 여는 건 확장이 한다(`askExtension('openSources')` → 확장 `app:openSources` 가 앱 탭 옆에 탭을 연다) — 페이지의 window.open 은 한 번 누를 때
+    하나만 열려서다. 확장이 없거나 옛 판이면 직접 열고, 브라우저가 막은 것은 패널에 「영상 N」 링크로 남긴다(`blockedSources`).
+  - 하니스 `pw-verify/run-gif-sources.sh`(11, 가짜 준비·구간 고르기 + 확장 1.5.0), `HARNESS=pw-verify/ttdl-solo/app-regress.mjs` 로 같은 판에서
+    레퍼런스 검색 탭 → [Step N GIF 생성] → GIF → [영상 소스 보기] 전체(12, 진짜 틱톡 영상). 단위 `test/video-sources.test.js`.
   자리는 노드 id 로 다시 찾는다(작업 중에 스텝이 밀릴 수 있다), 같은 영상은 바이트가 같으면 하나로 친다.
   한 자리에 **영상을 여러 개** 올릴 수 있다. 구간 고르기는 한 번에 두 가지를 받는다 — 한 구간짜리 후보 3개와,
   한 구간으로 안 담길 때 쓰는 **이어 붙이기**(조각 2~4개, 서로 다른 영상에서 와도 된다). 이어 붙이기는

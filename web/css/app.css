@@ -692,6 +692,9 @@ details.card[open] > summary .fx-chevron { transform: rotate(180deg); }
   font: inherit; font-size: 0.78rem; color: var(--fx-text-weak); text-decoration: underline; cursor: pointer;
 }
 .vp-note { font-size: 0.75rem; color: var(--fx-text-weak); line-height: 1.4; }
+/* [영상 소스 보기]에서 브라우저가 막은 것 — 하나씩 눌러 연다 */
+.vp-sources { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.vp-sources a { color: var(--fx-blue); font-weight: 600; }
 .vp-err { font-size: 0.8rem; color: var(--fx-error); line-height: 1.4; word-break: break-word; }
 .vp-bar { height: 5px; border-radius: 3px; background: var(--fx-track); overflow: hidden; }
 .vp-bar > div { height: 100%; background: var(--fx-blue); transition: width 0.3s ease; }

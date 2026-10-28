@@ -3,7 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { makeGifWithin, previewMp4, probe, stitch } from '../media/ffmpeg.js';
 import { saveAsset } from '../store.js';
-import { getVideo, previewPath, videoDir } from './store.js';
+import {
+  getVideo, previewPath, sourceUrlOf, videoDir,
+} from './store.js';
 import { workPath } from './prepare.js';
 
 /**
@@ -80,6 +82,14 @@ export async function seqPreview({ videoIds, parts, name, workDir, signal, tag =
 }
 
 /**
+ * GIF 에 쓴 영상들의 틱톡 주소 — 조각 순서대로 처음 나온 영상부터, 겹치지 않게. 틱톡에서 온 영상이 아니면 빠진다.
+ * 문서의 그 자리(asset.sources)에 남아 [영상 소스 보기]가 한꺼번에 연다(web/js/video.js).
+ */
+export function clipSources(parts) {
+  return [...new Set((parts ?? []).map((p) => sourceUrlOf(getVideo(p?.videoId))).filter(Boolean))];
+}
+
+/**
  * 고른 구간(또는 이어 붙인 구간들) → GIF → 사진첩(assets).
  * 문서는 사진첩만 가리키므로 영상을 지워도 남는다.
  * @param {{videoId:string,start:number,end:number}[]} o.parts
@@ -100,8 +110,11 @@ export async function makeClipAsset({ parts, label = '', workDir, signal, onProg
   const data = fs.readFileSync(made.file);
   const base = String(label || rec?.name || 'clip').replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9가-힣._-]+/g, '-').slice(0, 50);
   const meta = saveAsset({ name: `${base || 'clip'}-${stamp}.gif`, mime: 'image/gif', data });
+  const sources = clipSources(list);
   return {
-    asset: { id: meta.id, name: meta.name, mime: meta.mime, size: meta.size },
+    asset: {
+      id: meta.id, name: meta.name, mime: meta.mime, size: meta.size, ...(sources.length ? { sources } : {}),
+    },
     gif: {
       size: made.size, width: made.width, fps: made.fps, reduced: !!made.reduced, tooBig: !!made.tooBig,
     },

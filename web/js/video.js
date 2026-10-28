@@ -7,6 +7,7 @@ import {
 } from './clip-rank.js';
 import { createCutEditor } from './cut-editor.js';
 import { fromParts } from './cut-ranges.js';
+import { askExtension, extensionVersion } from './tiktok-bridge.js';
 
 /**
  * 스텝의 회색 상자 **안에서** 영상 → 참고 GIF 를 만든다. 불러온 브리프는 제품 사진 밖 모든 사진 자리가 이 상자다 —
@@ -142,9 +143,12 @@ export function createVideoPanel({ root, getDoc, getDraftId, commit, toast, onRe
   /**
    * 이미 GIF 가 들어 있는 자리를 눌렀을 때 — [삭제]·[GIF 다운로드]. 다시 만들려면 삭제해서 회색 자리로 돌린다
    * (그러면 같은 상자에 [레퍼런스 검색]·[영상으로 자동 생성]·[GIF 업로드]가 바로 뜬다).
+   * 틱톡 영상으로 만든 GIF 면 [영상 소스 보기]도 — 그 GIF 에 쓴 틱톡 영상들(asset.sources, 서버 clip.js)을 한꺼번에 연다.
    */
   function filledPanel(nodeId, asset) {
     const gif = asset.mime === 'image/gif' || /\.gif$/i.test(asset.name ?? '');
+    const sources = sourcesOf(asset);
+    const left = (blockedSources.get(nodeId) ?? []).filter((u) => sources.includes(u));
     // 하늘색 네모로 덮지 않고 그 GIF(·사진) 썸네일 위에 띄운다(paint 가 상자에 panel-over-image 를 붙인다)
     return el('div', { class: 'vp vp-over', dataset: { vidPanel: '1', overImage: '1' } },
       el('button', {
@@ -153,6 +157,18 @@ export function createVideoPanel({ root, getDoc, getDraftId, commit, toast, onRe
       el('button', {
         type: 'button', class: 'vp-btn', dataset: { vid: '1' }, on: { click: () => downloadAsset(asset) },
       }, gif ? 'GIF 다운로드' : '이미지 다운로드'),
+      sources.length ? el('button', {
+        type: 'button',
+        class: 'vp-btn',
+        title: `이 GIF 에 쓴 틱톡 영상 ${sources.length}개를 새 탭으로 엽니다`,
+        dataset: { vid: '1', sources: String(sources.length) },
+        on: { click: () => openSources(nodeId, sources) },
+      }, '영상 소스 보기') : null,
+      // 확장 없이 열어 브라우저가 막은 것 — 하나씩 눌러 연다
+      left.length ? el('div', { class: 'vp-note vp-sources' }, '브라우저가 막은 영상 소스:',
+        ...left.map((u) => el('a', {
+          href: u, target: '_blank', rel: 'noopener', dataset: { vid: '1' },
+        }, `영상 ${sources.indexOf(u) + 1}`))) : null,
       el('div', { class: 'vp-note' }, '삭제하면 회색 자리로 돌아가 다시 만들 수 있습니다'),
       el('button', {
         type: 'button', class: 'vp-link', dataset: { vid: '1' }, on: { click: () => { menus.delete(nodeId); paint(); } },
@@ -170,6 +186,34 @@ export function createVideoPanel({ root, getDoc, getDraftId, commit, toast, onRe
     });
     paint();
     toast('삭제했습니다 — 되돌리기로 살릴 수 있습니다');
+  }
+
+  const sourcesOf = (asset) => (Array.isArray(asset?.sources) ? asset.sources.filter((u) => /^https:\/\/www\.tiktok\.com\//.test(String(u))) : []);
+  const blockedSources = new Map(); // nodeId → 브라우저가 막아 못 연 소스 주소(패널에 링크로 보여 준다)
+
+  /**
+   * [영상 소스 보기] — 틱톡 다운로더(1.5.0~)가 새 탭으로 한꺼번에 연다. 페이지의 window.open 은 한 번 누를 때
+   * 하나만 열려서다. 확장이 없거나 옛 판이면 직접 열고, 브라우저가 막은 것은 패널에 링크로 남긴다.
+   */
+  async function openSources(nodeId, urls) {
+    if (extensionVersion()) {
+      const r = await askExtension('openSources', { urls });
+      if (r?.ok) {
+        blockedSources.delete(nodeId);
+        paint();
+        toast(urls.length > 1 ? `영상 소스 ${urls.length}개를 새 탭으로 열었습니다` : '영상 소스를 새 탭으로 열었습니다');
+        return;
+      }
+    }
+    const left = urls.filter((u) => {
+      const w = window.open(u, '_blank');
+      if (w) w.opener = null;
+      return !w;
+    });
+    if (left.length) blockedSources.set(nodeId, left);
+    else blockedSources.delete(nodeId);
+    paint();
+    if (left.length) toast(`브라우저가 ${left.length}개를 막았습니다 — 상자의 링크를 눌러 여세요(틱톡 다운로더 1.5 이상이면 한 번에 열립니다)`, true);
   }
 
   /** 들어 있는 GIF(·사진)를 내 컴퓨터로 받는다 — 같은 출처라 a[download] 로 바로 저장된다. */

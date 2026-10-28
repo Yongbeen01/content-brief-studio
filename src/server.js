@@ -402,7 +402,10 @@ async function handleApi(req, res, url) {
   if (m === 'POST' && p === '/api/videos') {
     const name = decodeURIComponent(String(req.headers['x-file-name'] ?? ''));
     const draftId = String(req.headers['x-draft-id'] ?? '');
-    return json(res, 200, { video: videos.publicView(await videos.receiveVideo(req, { name, draftId })) });
+    // 틱톡 다운로더(1.5.0~)가 보낸 영상이면 그 영상의 틱톡 주소 — GIF 의 [영상 소스 보기]가 연다
+    let sourceUrl = '';
+    try { sourceUrl = decodeURIComponent(String(req.headers['x-source-url'] ?? '')); } catch { /* 잘못된 값은 버린다 */ }
+    return json(res, 200, { video: videos.publicView(await videos.receiveVideo(req, { name, draftId, sourceUrl })) });
   }
   if (m === 'POST' && /^\/api\/videos\/[^/]+\/prepare$/.test(p)) {
     const id = p.split('/')[3];

@@ -70,7 +70,24 @@ export function update(id, patch) {
 export function publicView(rec) {
   if (!rec) return null;
   const { id, name, size, status, error, durationSec, usedSec, trimmed, sheets, hasAudio, speechLines, frames, createdAt } = rec;
-  return { id, name, size, status, error, durationSec, usedSec, trimmed, sheets, hasAudio, speechLines, frames, createdAt };
+  return {
+    id, name, size, status, error, durationSec, usedSec, trimmed, sheets, hasAudio, speechLines, frames, createdAt, sourceUrl: sourceUrlOf(rec),
+  };
+}
+
+/**
+ * 틱톡에서 그 영상을 여는 주소 — 이 영상으로 만든 GIF 에 「영상 소스」로 남긴다(clip.js).
+ * 틱톡 다운로더 1.5.0~ 는 올릴 때 `x-source-url` 로 준다. 그 전 판이 보냈거나 확장으로 내려받아 직접 올린 영상은
+ * 확장이 붙이는 파일 이름 「계정_영상번호.mp4」(브라우저가 붙이는 「 (1)」 포함)에서 만든다.
+ */
+const TIKTOK_VIDEO_URL = /^https:\/\/www\.tiktok\.com\/@[A-Za-z0-9._-]{1,64}\/video\/\d{6,25}$/;
+export const cleanSourceUrl = (url) => (TIKTOK_VIDEO_URL.test(String(url ?? '').trim()) ? String(url).trim() : '');
+export function sourceUrlOf(rec) {
+  if (!rec) return '';
+  const given = cleanSourceUrl(rec.sourceUrl);
+  if (given) return given;
+  const m = /^([A-Za-z0-9._]{2,24})_(\d{15,25})(?: \(\d+\))?\.(?:mp4|mov|webm|m4v)$/i.exec(path.basename(String(rec.name ?? '')));
+  return m ? `https://www.tiktok.com/@${m[1]}/video/${m[2]}` : '';
 }
 
 /**
@@ -85,15 +102,17 @@ function uploadTmp(name) {
 }
 
 /** 다 받은 임시 파일을 영상으로 등록한다. */
-function adopt({ name, tmp, size, hash, draftId }) {
+function adopt({ name, tmp, size, hash, draftId, sourceUrl = '' }) {
   // 같은 영상을 여러 스텝에 올리는 일이 흔하다. 바이트가 같으면 이미 올린 것을 그대로 쓴다 —
   // 화면 읽기(제일 비싼 호출)를 영상마다 한 번만 하기 위해서다.
   // listVideos('') 는 전부를 뜻하므로 초안 id 를 직접 맞춘다 — 다른 초안의 영상을 물고 오면 안 된다.
+  const source = cleanSourceUrl(sourceUrl);
   const same = listVideos().find((v) => v.hash === hash && String(v.draftId) === String(draftId)
     && v.status !== 'error' && fs.existsSync(path.join(dirOf(v.id), v.file)));
   if (same) {
     fs.rmSync(tmp, { force: true });
-    return same;
+    // 예전에 주소 없이 올라온 같은 영상이면 이번에 받은 틱톡 주소를 적어 둔다
+    return source && !cleanSourceUrl(same.sourceUrl) ? update(same.id, { sourceUrl: source }) : same;
   }
   const id = crypto.randomBytes(8).toString('hex');
   fs.mkdirSync(dirOf(id), { recursive: true });
@@ -103,6 +122,7 @@ function adopt({ name, tmp, size, hash, draftId }) {
     draftId: String(draftId),
     hash,
     name: String(name),
+    sourceUrl: source,
     size,
     file: `original${path.extname(name).toLowerCase()}`,
     status: 'new',
@@ -128,7 +148,7 @@ export function addVideo({ name, data, draftId = '' }) {
  * 올리는 영상을 요청 본문에서 바로 디스크로 받는다. 크기 제한이 없어서 — 몇 GB 짜리를
  * 메모리에 통째로 올리지 않도록 받으면서 해시를 같이 잰다.
  */
-export async function receiveVideo(stream, { name, draftId = '' }) {
+export async function receiveVideo(stream, { name, draftId = '', sourceUrl = '' }) {
   const tmp = uploadTmp(name);
   const hash = crypto.createHash('sha256');
   let size = 0;
@@ -153,7 +173,9 @@ export async function receiveVideo(stream, { name, draftId = '' }) {
     fs.rmSync(tmp, { force: true });
     throw e;
   }
-  return adopt({ name, tmp, size, hash: hash.digest('hex'), draftId });
+  return adopt({
+    name, tmp, size, hash: hash.digest('hex'), draftId, sourceUrl,
+  });
 }
 
 export const originalPath = (id) => {
